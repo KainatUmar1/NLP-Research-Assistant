@@ -105,4 +105,4 @@ A complete requirements.txt is provided in the files – ensure you install all 
 
 ---
 
-Made with ❤️ for the research community
+Made for the research community!
