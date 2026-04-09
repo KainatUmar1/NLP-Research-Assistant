@@ -1,8 +1,6 @@
 """
-NLP Research Assistant - Semester Project with Interactive HTML Frontend
-Inspired by LexAna: Advanced NLP tool for research document analysis
-Features: PDF extraction, summarization, semantic search, trend detection
-Interactive Web Interface using Streamlit
+NLP Research Assistant - Professional UI Version
+Advanced NLP tool for research document analysis with optimized, aesthetic interface
 """
 
 # ==================== IMPORTS ====================
@@ -24,16 +22,19 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from sentence_transformers import SentenceTransformer
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import plotly.express as px
 import networkx as nx
 from wordcloud import WordCloud
-from transformers import pipeline
+# FIX: Import directly instead of using pipeline for summarization
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lex_rank import LexRankSummarizer
 from sumy.summarizers.lsa import LsaSummarizer
 import chromadb
 
-# Try to import streamlit, install if not available
+# Try to import streamlit
 try:
     import streamlit as st
     from streamlit.components.v1 import html
@@ -46,33 +47,214 @@ except ImportError:
     from streamlit.components.v1 import html
     STREAMLIT_AVAILABLE = True
 
+# Try to import psutil for system info (optional)
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
+# ==================== CUSTOM CSS & STYLING ====================
+CUSTOM_CSS = """
+<style>
+    /* ── CSS custom properties: light defaults, overridden by .theme-dark ── */
+    :root {
+        --card-bg:        #ffffff;
+        --card-border:    #e2e8f0;
+        --card-text:      #2d3748;
+        --card-subtext:   #718096;
+        --page-bg:        #f8fafc;
+        --page-bg2:       #edf2f7;
+        --input-bg:       #f8fafc;
+        --summary-bg:     #f8fafc;
+        --summary-text:   #2d3748;
+        --passage-bg:     #f8fafc;
+        --header-border:  #e2e8f0;
+        --sub-header-clr: #4a5568;
+        --tag-bg:         #e2e8f0;
+        --tag-text:       #4a5568;
+        --entity-bg:      #ffffff;
+        --rec-bg:         #f8fafc;
+        --activity-border:#e2e8f0;
+        --metric-bg:      #ffffff;
+        --metric-text:    #2d3748;
+        --metric-sub:     #718096;
+        --search-card-bg: #ffffff;
+        --trend-card-bg:  #f8fafc;
+        --paper-meta-bg:  #f8fafc;
+    }
+
+    /* ── Dark theme overrides (injected by Python when user picks Dark) ── */
+    .theme-dark, .theme-dark * {
+        --card-bg:        #1e2130;
+        --card-border:    #3a3f5c;
+        --card-text:      #e2e8f0;
+        --card-subtext:   #a0aec0;
+        --page-bg:        #161824;
+        --page-bg2:       #1a1d2e;
+        --input-bg:       #252840;
+        --summary-bg:     #1e2130;
+        --summary-text:   #e2e8f0;
+        --passage-bg:     #252840;
+        --header-border:  #3a3f5c;
+        --sub-header-clr: #a0aec0;
+        --tag-bg:         #3a3f5c;
+        --tag-text:       #e2e8f0;
+        --entity-bg:      #1e2130;
+        --rec-bg:         #1a1d2e;
+        --activity-border:#3a3f5c;
+        --metric-bg:      #1e2130;
+        --metric-text:    #e2e8f0;
+        --metric-sub:     #a0aec0;
+        --search-card-bg: #1e2130;
+        --trend-card-bg:  #1a1d2e;
+        --paper-meta-bg:  #1a1d2e;
+    }
+
+    /* ── Detect system dark mode automatically when theme = System ── */
+    @media (prefers-color-scheme: dark) {
+        .theme-system, .theme-system * {
+            --card-bg:        #1e2130;
+            --card-border:    #3a3f5c;
+            --card-text:      #e2e8f0;
+            --card-subtext:   #a0aec0;
+            --page-bg:        #161824;
+            --page-bg2:       #1a1d2e;
+            --input-bg:       #252840;
+            --summary-bg:     #1e2130;
+            --summary-text:   #e2e8f0;
+            --passage-bg:     #252840;
+            --header-border:  #3a3f5c;
+            --sub-header-clr: #a0aec0;
+            --tag-bg:         #3a3f5c;
+            --tag-text:       #e2e8f0;
+            --entity-bg:      #1e2130;
+            --rec-bg:         #1a1d2e;
+            --activity-border:#3a3f5c;
+            --metric-bg:      #1e2130;
+            --metric-text:    #e2e8f0;
+            --metric-sub:     #a0aec0;
+            --search-card-bg: #1e2130;
+            --trend-card-bg:  #1a1d2e;
+            --paper-meta-bg:  #1a1d2e;
+        }
+    }
+
+    .main { padding: 0rem 1rem; }
+
+    .main-header {
+        font-size: 2.5rem; font-weight: 700;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        margin-bottom: 1rem;
+    }
+    .sub-header {
+        font-size: 1.5rem; font-weight: 600;
+        color: var(--sub-header-clr);
+        margin-bottom: 1rem;
+        border-bottom: 2px solid var(--header-border);
+        padding-bottom: 0.5rem;
+    }
+
+    /* Cards */
+    .stCard {
+        background: var(--card-bg); color: var(--card-text);
+        border-radius: 12px; padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border: 1px solid var(--card-border); margin-bottom: 1rem;
+    }
+    .paper-card {
+        background: var(--card-bg); color: var(--card-text);
+        border-radius: 10px; padding: 1.2rem;
+        border-left: 4px solid #667eea; transition: transform 0.2s;
+    }
+    .paper-card strong { color: var(--card-text); }
+    .paper-card small  { color: var(--card-subtext); }
+    .paper-card:hover  { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+
+    /* Summary */
+    .summary-box {
+        background: var(--summary-bg); color: var(--summary-text) !important;
+        border-radius: 10px; padding: 1.5rem;
+        border: 1px solid var(--card-border); margin: 1rem 0;
+        font-size: 1rem; line-height: 1.6;
+        max-height: 400px; overflow-y: auto; width: 100%;
+    }
+    .summary-box h4 { color: var(--card-text) !important; margin-top: 0; }
+    .summary-box p, .summary-box span, .summary-box div { color: var(--summary-text) !important; }
+
+    /* Metric cards */
+    .metric-card {
+        background: var(--metric-bg); color: var(--metric-text);
+        border-radius: 10px; padding: 1rem;
+        border: 1px solid var(--card-border); text-align: center;
+    }
+    .metric-value { font-size: 2rem; font-weight: 700; }
+    .metric-label { font-size: 0.875rem; color: var(--metric-sub); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Tags */
+    .tag         { display: inline-block; background: var(--tag-bg); color: var(--tag-text); padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.875rem; margin: 0.25rem; }
+    .tag-primary { background: #667eea; color: #ffffff !important; }
+    .tag-success { background: #48bb78; color: #ffffff !important; }
+    .tag-warning { background: #ed8936; color: #ffffff !important; }
+
+    /* Buttons */
+    .stButton > button { border-radius: 8px; font-weight: 600; transition: all 0.3s; }
+    .stButton > button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+
+    /* Search */
+    .search-result {
+        background: var(--search-card-bg); color: var(--card-text);
+        border-radius: 10px; padding: 1rem; margin: 1rem 0;
+        border-left: 4px solid #4299e1; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    /* Misc */
+    .stProgress > div > div > div > div { background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); }
+    .dataframe { border-radius: 8px; overflow: hidden; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track  { background: #f1f1f1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb  { background: #c1c1c1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #a1a1a1; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0 0; padding: 10px 20px; font-weight: 600; }
+
+    /* Alerts */
+    .success-message { background: linear-gradient(135deg,#c6f6d5,#9ae6b4); border:1px solid #48bb78; border-radius:8px; padding:1rem; color:#22543d; }
+    .info-message    { background: linear-gradient(135deg,#bee3f8,#90cdf4); border:1px solid #4299e1; border-radius:8px; padding:1rem; color:#2c5282; }
+    .warning-message { background: linear-gradient(135deg,#feebc8,#fbd38d); border:1px solid #ed8936; border-radius:8px; padding:1rem; color:#9c4221; }
+</style>
+"""
+
+# ==================== THEME HELPERS ====================
+def get_theme_class() -> str:
+    """Return CSS class that activates the correct theme variables."""
+    t = st.session_state.get('app_theme', 'Light')
+    return {'Light': 'theme-light', 'Dark': 'theme-dark', 'System': 'theme-system'}.get(t, 'theme-light')
+
+def themed(html: str) -> str:
+    """Wrap inline HTML in a div carrying the active theme class."""
+    return f"<div class='{get_theme_class()}'>{html}</div>"
+
 # ==================== CONFIGURATION ====================
 @dataclass
 class Config:
     """Configuration settings for the NLP Research Assistant"""
-    # Model settings
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"  # Lightweight embedding model
-    SUMMARIZATION_MODEL: str = "facebook/bart-large-cnn"  # Summarization model
-    NER_MODEL: str = "en_core_web_sm"  # spaCy NER model
-    
-    # Processing settings
-    CHUNK_SIZE: int = 1000  # Characters per chunk for processing
-    CHUNK_OVERLAP: int = 200  # Overlap between chunks
-    MAX_SUMMARY_LENGTH: int = 150  # Max words in summary
-    MIN_SENTENCE_LENGTH: int = 20  # Min characters in sentence
-    
-    # Search settings
-    TOP_K_RESULTS: int = 5  # Number of search results to return
-    SIMILARITY_THRESHOLD: float = 0.7  # Minimum similarity score
-    
-    # Trend detection
-    TREND_WINDOW_DAYS: int = 30  # Days for trend analysis
-    TOP_TREND_TERMS: int = 10  # Number of trending terms to show
-    
-    # UI/Display
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    SUMMARIZATION_MODEL: str = "facebook/bart-large-cnn"
+    NER_MODEL: str = "en_core_web_sm"
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 200
+    MAX_SUMMARY_LENGTH: int = 200
+    MIN_SENTENCE_LENGTH: int = 20
+    TOP_K_RESULTS: int = 5
+    SIMILARITY_THRESHOLD: float = 0.7
+    TREND_WINDOW_DAYS: int = 30
+    TOP_TREND_TERMS: int = 10
     ENABLE_VISUALIZATIONS: bool = True
     SAVE_RESULTS: bool = True
     RESULTS_DIR: str = "research_results"
+    THEME: str = "light"
 
 # ==================== DATA STRUCTURES ====================
 @dataclass
@@ -87,17 +269,20 @@ class ResearchPaper:
     publication_date: Optional[str] = None
     keywords: List[str] = None
     embeddings: Optional[np.ndarray] = None
-    
+
     def __post_init__(self):
         if self.keywords is None:
             self.keywords = []
-    
+
     def to_dict(self):
-        return asdict(self)
+        d = asdict(self)
+        # embeddings are numpy arrays, not JSON serializable
+        if d.get('embeddings') is not None:
+            d['embeddings'] = None
+        return d
 
 @dataclass
 class SearchResult:
-    """Represents a search result"""
     paper_id: str
     title: str
     similarity_score: float
@@ -106,7 +291,6 @@ class SearchResult:
 
 @dataclass
 class AnalysisResult:
-    """Container for analysis results"""
     summary: str
     key_terms: List[str]
     entities: Dict[str, List[str]]
@@ -117,508 +301,364 @@ class AnalysisResult:
 # ==================== CORE NLP CLASS ====================
 class NLPResearchAssistant:
     """Main class for NLP Research Assistant functionality"""
-    
+
     def __init__(self, config: Config = None):
-        """Initialize the NLP Research Assistant"""
         self.config = config or Config()
         self.papers: Dict[str, ResearchPaper] = {}
         self.vector_db = None
         self.embeddings_cache: Dict[str, np.ndarray] = {}
-        
-        # Initialize session state for Streamlit
         self._init_session_state()
-        
-        # Create results directory
         if self.config.SAVE_RESULTS and not os.path.exists(self.config.RESULTS_DIR):
             os.makedirs(self.config.RESULTS_DIR)
-    
+
     def _init_session_state(self):
-        """Initialize Streamlit session state variables"""
-        if 'papers_loaded' not in st.session_state:
-            st.session_state.papers_loaded = False
-        if 'current_paper' not in st.session_state:
-            st.session_state.current_paper = None
-        if 'search_results' not in st.session_state:
-            st.session_state.search_results = []
-        if 'insights' not in st.session_state:
-            st.session_state.insights = {}
-        if 'trends' not in st.session_state:
-            st.session_state.trends = {}
-    
+        defaults = {
+            'papers_loaded': False,
+            'current_paper': None,
+            'search_results': [],
+            'insights': {},
+            'trends': {},
+            'summary_generated': False,
+            'current_summary': "",
+            'app_theme': 'Light',
+        }
+        for key, val in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = val
+
+    # ==================== FIX: REVISED NLP INITIALIZATION ====================
     def _initialize_nlp_components(self):
-        """Initialize all NLP models and components"""
-        with st.spinner("Initializing NLP components..."):
-            
-            # Download NLTK data if needed
+        """Initialize all NLP models with robust error handling.
+        
+        KEY FIX: Newer transformers versions removed 'summarization' from pipeline tasks.
+        We now load the model directly via AutoModelForSeq2SeqLM instead of using pipeline().
+        """
+        with st.spinner("🔄 Initializing NLP components..."):
+
+            # --- NLTK data ---
             self._download_nltk_data()
-            
-            # Initialize embedding model
-            st.info("Loading embedding model...")
+
+            # --- Embedding model ---
+            st.info("📥 Loading embedding model...")
             self.embedding_model = SentenceTransformer(self.config.EMBEDDING_MODEL)
-            
-            # Initialize summarization pipeline
-            st.info("Loading summarization model...")
-            self.summarizer = pipeline(
-                "summarization",
-                model=self.config.SUMMARIZATION_MODEL,
-                tokenizer=self.config.SUMMARIZATION_MODEL
-            )
-            
-            # Initialize spaCy for NER
-            st.info("Loading spaCy model...")
+            st.success("✅ Embedding model loaded.")
+
+            # --- Summarization: direct model load (no pipeline) ---
+            st.info("📝 Loading summarization model (this may take a moment)...")
+            self._summarization_model = None
+            self._summarization_tokenizer = None
+
+            try:
+                self._summarization_tokenizer = AutoTokenizer.from_pretrained(
+                    self.config.SUMMARIZATION_MODEL
+                )
+                self._summarization_model = AutoModelForSeq2SeqLM.from_pretrained(
+                    self.config.SUMMARIZATION_MODEL
+                )
+                st.success("✅ Summarization model loaded.")
+            except Exception as e:
+                st.warning(
+                    f"⚠️ Could not load neural summarization model: {str(e)[:80]}. "
+                    "Falling back to extractive summarization (sumy)."
+                )
+                self._summarization_model = None
+                self._summarization_tokenizer = None
+
+            # Attach summarize_text as an instance method
+            def _summarize(text: str, max_length: int = 150) -> str:
+                # Try neural model first
+                if self._summarization_model and self._summarization_tokenizer:
+                    try:
+                        inputs = self._summarization_tokenizer(
+                            text[:4000],
+                            return_tensors="pt",
+                            truncation=True,
+                            max_length=1024,
+                        )
+                        summary_ids = self._summarization_model.generate(
+                            inputs["input_ids"],
+                            max_length=max_length,
+                            min_length=50,
+                            num_beams=4,
+                            early_stopping=True,
+                        )
+                        return self._summarization_tokenizer.decode(
+                            summary_ids[0], skip_special_tokens=True
+                        )
+                    except Exception as e:
+                        st.warning(f"Neural summarization failed, using extractive: {e}")
+
+                # Extractive fallback via sumy
+                parser = PlaintextParser.from_string(text, Tokenizer("english"))
+                try:
+                    summarizer = LexRankSummarizer()
+                except Exception:
+                    summarizer = LsaSummarizer()
+                sentences = summarizer(parser.document, sentences_count=5)
+                return " ".join(str(s) for s in sentences)
+
+            self.summarize_text = _summarize
+
+            # --- spaCy NER ---
+            st.info("🏷️ Loading spaCy model...")
             try:
                 self.nlp = spacy.load(self.config.NER_MODEL)
-            except:
+            except OSError:
                 st.warning(f"Downloading spaCy model: {self.config.NER_MODEL}")
                 spacy.cli.download(self.config.NER_MODEL)
                 self.nlp = spacy.load(self.config.NER_MODEL)
-            
-            # Initialize NLTK components
-            self.stop_words = set(stopwords.words('english'))
+            st.success("✅ spaCy model loaded.")
+
+            # --- NLTK components ---
+            self.stop_words = set(stopwords.words("english"))
             self.lemmatizer = WordNetLemmatizer()
-            
-            # Initialize ChromaDB for vector storage
+
+            # --- ChromaDB ---
             self._initialize_vector_db()
-            
-            st.success("NLP components initialized successfully!")
-    
+
+            st.success("✅ All NLP components initialized successfully!")
+
     def _download_nltk_data(self):
-        """Download required NLTK data"""
-        required_data = [
-            'punkt',
-            'stopwords',
-            'wordnet',
-            'averaged_perceptron_tagger',
-            'punkt_tab',
-            'omw-eng',
-            'brown',
-        ]
-        
+        """Download required NLTK data packages."""
+        required = ['punkt', 'stopwords', 'wordnet', 'averaged_perceptron_tagger', 'punkt_tab']
         progress_bar = st.progress(0)
-        for idx, data in enumerate(required_data):
+        status = st.empty()
+        for idx, pkg in enumerate(required):
+            status.text(f"📥 Checking NLTK data: {pkg}")
             try:
-                nltk.data.find(f'tokenizers/{data}')
-            except LookupError:
-                st.info(f"Downloading NLTK data: {data}")
-                try:
-                    nltk.download(data, quiet=True)
-                except Exception as e:
-                    st.warning(f"Could not download {data}: {e}")
-            progress_bar.progress((idx + 1) / len(required_data))
+                nltk.download(pkg, quiet=True)
+            except Exception as e:
+                st.warning(f"Could not download NLTK package '{pkg}': {e}")
+            progress_bar.progress((idx + 1) / len(required))
         progress_bar.empty()
-    
+        status.empty()
+
     def _initialize_vector_db(self):
-        """Initialize ChromaDB for vector storage"""
         self.vector_db = chromadb.EphemeralClient()
-        
-        # Create or get collection
         self.collection = self.vector_db.get_or_create_collection(
             name="research_papers",
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine"},
         )
-    
+
     # ==================== DOCUMENT PROCESSING ====================
-    
+
     def load_pdf(self, file_path: str) -> Optional[ResearchPaper]:
-        """
-        Extract text from PDF and create ResearchPaper object
-        """
         if not os.path.exists(file_path):
-            st.error(f"File not found: {file_path}")
+            st.error(f"❌ File not found: {file_path}")
             return None
-        
-        with st.spinner(f"Processing PDF: {os.path.basename(file_path)}..."):
+
+        with st.spinner(f"📄 Processing PDF: {os.path.basename(file_path)}..."):
             try:
                 text = ""
                 metadata = {}
-                
-                # Extract text using pdfplumber (more accurate)
+
                 with pdfplumber.open(file_path) as pdf:
                     for page in pdf.pages:
                         page_text = page.extract_text()
                         if page_text:
                             text += page_text + "\n"
-                    
-                    # Try to extract metadata from first page
                     if pdf.pages:
-                        first_page = pdf.pages[0]
-                        first_page_text = first_page.extract_text()
-                        metadata = self._extract_metadata(first_page_text)
-                
-                # Fallback to PyPDF2 if pdfplumber fails
+                        metadata = self._extract_metadata(pdf.pages[0].extract_text() or "")
+
                 if not text.strip():
-                    with open(file_path, 'rb') as file:
-                        pdf_reader = PyPDF2.PdfReader(file)
-                        for page in pdf_reader.pages:
-                            text += page.extract_text() + "\n"
-                
+                    with open(file_path, "rb") as f:
+                        reader = PyPDF2.PdfReader(f)
+                        for page in reader.pages:
+                            text += (page.extract_text() or "") + "\n"
+
                 if not text.strip():
-                    st.error("No text could be extracted from PDF")
+                    st.error("❌ No text could be extracted from PDF.")
                     return None
-                
-                # Generate unique ID
+
                 file_hash = hashlib.md5(text.encode()).hexdigest()[:10]
                 paper_id = f"paper_{file_hash}"
-                
-                # Extract title and abstract
-                title = metadata.get('title', os.path.basename(file_path))
-                abstract = self._extract_abstract(text)
-                
+
                 paper = ResearchPaper(
                     id=paper_id,
-                    title=title,
-                    authors=metadata.get('authors', []),
-                    abstract=abstract,
+                    title=metadata.get("title", os.path.basename(file_path)),
+                    authors=metadata.get("authors", []),
+                    abstract=self._extract_abstract(text),
                     content=text,
                     source_file=file_path,
-                    publication_date=metadata.get('publication_date'),
-                    keywords=metadata.get('keywords', [])
+                    publication_date=metadata.get("publication_date"),
+                    keywords=metadata.get("keywords", []),
                 )
-                
-                # Store paper
+
                 self.papers[paper_id] = paper
-                
-                # Generate and store embeddings
                 self._generate_embeddings(paper)
-                
-                # Add to vector database
                 self._add_to_vector_db(paper)
-                
                 st.session_state.papers_loaded = True
-                st.success(f"Successfully loaded paper: {title}")
                 return paper
-                
+
             except Exception as e:
-                st.error(f"Error processing PDF: {str(e)}")
+                st.error(f"❌ Error processing PDF: {str(e)}")
                 return None
-    
+
     def _extract_metadata(self, text: str) -> Dict[str, Any]:
-        """Extract metadata from document text"""
-        metadata = {
-            'title': '',
-            'authors': [],
-            'publication_date': None,
-            'keywords': []
-        }
-        
-        # Try to find title (usually first line or after abstract marker)
-        lines = text.split('\n')
+        metadata = {"title": "", "authors": [], "publication_date": None, "keywords": []}
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
         if lines:
-            metadata['title'] = lines[0].strip()[:200]  # Limit title length
-        
-        # Look for author patterns
-        author_patterns = [
-            r'by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s*,\s*[A-Z][a-z]+)*)',
+            metadata["title"] = lines[0][:200]
+
+        for pattern in [
             r'Authors?:\s*(.+)',
-            r'([A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+(?:\s*,\s*[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+)*)'
-        ]
-        
-        for pattern in author_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                authors_text = match.group(1)
-                # Split authors by commas or 'and'
-                authors = re.split(r',\s*|\s+and\s+', authors_text)
-                metadata['authors'] = [a.strip() for a in authors if a.strip()]
+            r'by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s*,\s*[A-Z][a-z]+)*)',
+        ]:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                metadata["authors"] = [a.strip() for a in re.split(r',\s*|\s+and\s+', m.group(1)) if a.strip()]
                 break
-        
-        # Look for publication date
-        date_patterns = [
-            r'(\d{4})',
-            r'published\s+(?:on|in)\s+(\w+\s+\d{4})',
-            r'©\s*(\d{4})'
-        ]
-        
-        for pattern in date_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                metadata['publication_date'] = match.group(1)
+
+        for pattern in [r'©\s*(\d{4})', r'published\s+(?:on|in)\s+(\w+\s+\d{4})', r'(\d{4})']:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                metadata["publication_date"] = m.group(1)
                 break
-        
-        # Extract potential keywords (uppercase words or after 'Keywords:')
-        keyword_match = re.search(r'Keywords?:\s*(.+)', text, re.IGNORECASE)
-        if keyword_match:
-            keywords_text = keyword_match.group(1)
-            # Split by commas, semicolons, or newlines
-            keywords = re.split(r'[,;\n]', keywords_text)
-            metadata['keywords'] = [k.strip() for k in keywords if k.strip()]
-        
+
+        m = re.search(r'Keywords?:\s*(.+)', text, re.IGNORECASE)
+        if m:
+            metadata["keywords"] = [k.strip() for k in re.split(r'[,;\n]', m.group(1)) if k.strip()]
+
         return metadata
-    
+
     def _extract_abstract(self, text: str) -> str:
-        """Extract abstract from research paper"""
-        abstract_patterns = [
+        for pattern in [
             r'Abstract\s*\n(.+?)(?=\n\s*\n|\nIntroduction|\n\d\.)',
             r'ABSTRACT\s*\n(.+?)(?=\n\s*\n|\nINTRODUCTION|\n1\.)',
-            r'Summary\s*\n(.+?)(?=\n\s*\n|\nIntroduction)'
-        ]
-        
-        for pattern in abstract_patterns:
-            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-            if match:
-                abstract = match.group(1).strip()
-                # Clean up abstract
-                abstract = re.sub(r'\s+', ' ', abstract)
-                return abstract[:1000]  # Limit abstract length
-        
-        # If no abstract found, use first few sentences
+            r'Summary\s*\n(.+?)(?=\n\s*\n|\nIntroduction)',
+        ]:
+            m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if m:
+                return re.sub(r'\s+', ' ', m.group(1).strip())[:1000]
         sentences = sent_tokenize(text)
-        if len(sentences) > 3:
-            return ' '.join(sentences[:3])
-        return text[:500]
-    
+        return " ".join(sentences[:3]) if len(sentences) > 3 else text[:500]
+
     def _generate_embeddings(self, paper: ResearchPaper):
-        """Generate embeddings for paper content"""
-        # Use abstract for embedding if available, otherwise use first chunk
-        text_to_embed = paper.abstract if paper.abstract else self._chunk_text(paper.content)[0]
-        
-        if text_to_embed:
-            embedding = self.embedding_model.encode(text_to_embed)
-            paper.embeddings = embedding
-            self.embeddings_cache[paper.id] = embedding
-    
+        text = paper.abstract or (self._chunk_text(paper.content) or [""])[0]
+        if text:
+            emb = self.embedding_model.encode(text)
+            paper.embeddings = emb
+            self.embeddings_cache[paper.id] = emb
+
     def _add_to_vector_db(self, paper: ResearchPaper):
-        """Add paper to vector database"""
         if paper.embeddings is not None:
             self.collection.add(
                 embeddings=[paper.embeddings.tolist()],
-                documents=[paper.content[:10000]],  # Limit document size
+                documents=[paper.content[:10000]],
                 metadatas=[{
                     "title": paper.title,
                     "authors": ", ".join(paper.authors),
                     "source": paper.source_file,
-                    "date": paper.publication_date or ""
+                    "date": paper.publication_date or "",
                 }],
-                ids=[paper.id]
+                ids=[paper.id],
             )
-    
+
     # ==================== TEXT PROCESSING UTILITIES ====================
-    
+
     def _chunk_text(self, text: str, chunk_size: int = None, overlap: int = None) -> List[str]:
-        """Split text into overlapping chunks"""
         chunk_size = chunk_size or self.config.CHUNK_SIZE
         overlap = overlap or self.config.CHUNK_OVERLAP
-        
-        chunks = []
-        start = 0
-        text_length = len(text)
-        
-        while start < text_length:
-            end = min(start + chunk_size, text_length)
-            
-            # Try to end at sentence boundary
-            if end < text_length:
-                # Look for sentence-ending punctuation
-                sentence_end = max(
-                    text.rfind('.', start, end),
-                    text.rfind('!', start, end),
-                    text.rfind('?', start, end),
-                    text.rfind('\n', start, end)
-                )
-                if sentence_end > start + chunk_size // 2:  # Ensure reasonable chunk size
-                    end = sentence_end + 1
-            
+        chunks, start = [], 0
+        while start < len(text):
+            end = min(start + chunk_size, len(text))
+            if end < len(text):
+                for ch in ['.', '!', '?', '\n']:
+                    pos = text.rfind(ch, start, end)
+                    if pos > start + chunk_size // 2:
+                        end = pos + 1
+                        break
             chunk = text[start:end].strip()
             if chunk:
                 chunks.append(chunk)
-            
-            start = end - overlap  # Apply overlap
-        
+            start = end - overlap
         return chunks
-    
+
     def _preprocess_text(self, text: str) -> str:
-        """Clean and preprocess text for analysis"""
-        # Convert to lowercase
         text = text.lower()
-        
-        # Remove special characters and numbers (keep basic punctuation)
         text = re.sub(r'[^\w\s.,;:!?-]', ' ', text)
-        
-        # Remove extra whitespace
-        text = re.sub(r'\s+', ' ', text)
-        
-        return text.strip()
-    
+        return re.sub(r'\s+', ' ', text).strip()
+
     def _extract_key_terms(self, text: str, top_n: int = 20) -> List[str]:
-        """Extract key terms using TF-IDF"""
-        # Preprocess text
-        processed_text = self._preprocess_text(text)
-        
-        # Create TF-IDF vectorizer
-        vectorizer = TfidfVectorizer(
-            stop_words='english',
-            max_features=top_n * 2,
-            ngram_range=(1, 3)  # Include unigrams, bigrams, and trigrams
-        )
-        
-        # Fit and transform
-        tfidf_matrix = vectorizer.fit_transform([processed_text])
-        
-        # Get feature names and scores
-        feature_names = vectorizer.get_feature_names_out()
-        scores = tfidf_matrix.toarray()[0]
-        
-        # Get top terms
-        top_indices = scores.argsort()[-top_n:][::-1]
-        key_terms = [feature_names[i] for i in top_indices]
-        
-        return key_terms
-    
+        processed = self._preprocess_text(text)
+        vec = TfidfVectorizer(stop_words='english', max_features=top_n * 2, ngram_range=(1, 3))
+        try:
+            matrix = vec.fit_transform([processed])
+            names = vec.get_feature_names_out()
+            scores = matrix.toarray()[0]
+            return [names[i] for i in scores.argsort()[-top_n:][::-1]]
+        except Exception:
+            return []
+
     # ==================== CORE FUNCTIONALITIES ====================
-    
+
     def summarize_paper(self, paper_id: str, method: str = "abstractive") -> str:
-        """
-        Generate summary of a research paper
-        Methods: "abstractive" (neural) or "extractive" (traditional)
-        """
         if paper_id not in self.papers:
-            return "Paper not found"
-        
+            return "Paper not found."
         paper = self.papers[paper_id]
-        
         if method == "abstractive":
-            # Use transformer-based summarization
-            try:
-                with st.spinner("Generating abstractive summary..."):
-                    summary = self.summarizer(
-                        paper.content[:4000],  # Limit input length
-                        max_length=self.config.MAX_SUMMARY_LENGTH,
-                        min_length=50,
-                        do_sample=False
-                    )[0]['summary_text']
-                return summary
-            except:
-                # Fall back to extractive summarization
-                method = "extractive"
-        
-        if method == "extractive":
-            # Use traditional extractive summarization
-            with st.spinner("Generating extractive summary..."):
-                parser = PlaintextParser.from_string(paper.content, Tokenizer("english"))
-                
-                # Try LexRank first, fall back to LSA
-                try:
-                    summarizer = LexRankSummarizer()
-                except:
-                    summarizer = LsaSummarizer()
-                
-                # Generate summary sentences
-                summary_sentences = summarizer(parser.document, sentences_count=5)
-                summary = " ".join(str(sentence) for sentence in summary_sentences)
-                
-                return summary
-        
-        return "Invalid summarization method"
-    
+            return self.summarize_text(paper.content, max_length=self.config.MAX_SUMMARY_LENGTH)
+        # Extractive
+        parser = PlaintextParser.from_string(paper.content, Tokenizer("english"))
+        try:
+            summarizer = LexRankSummarizer()
+        except Exception:
+            summarizer = LsaSummarizer()
+        return " ".join(str(s) for s in summarizer(parser.document, sentences_count=5))
+
     def semantic_search(self, query: str, top_k: int = None) -> List[SearchResult]:
-        """
-        Perform semantic search across all papers
-        """
         top_k = top_k or self.config.TOP_K_RESULTS
-        
         if not self.papers:
             return []
-        
-        # Encode query
-        query_embedding = self.embedding_model.encode(query)
-        
-        # Search in vector database
-        results = self.collection.query(
-            query_embeddings=[query_embedding.tolist()],
-            n_results=top_k
-        )
-        
-        search_results = []
-        
-        if results['ids'][0]:
-            for i, paper_id in enumerate(results['ids'][0]):
-                if paper_id in self.papers:
-                    paper = self.papers[paper_id]
-                    
-                    # Find relevant passages
-                    relevant_passages = self._find_relevant_passages(
-                        paper.content,
-                        query,
-                        top_n=3
-                    )
-                    
-                    result = SearchResult(
-                        paper_id=paper.id,
-                        title=paper.title,
-                        similarity_score=results['distances'][0][i],
-                        relevant_passages=relevant_passages,
-                        metadata={
-                            'authors': paper.authors,
-                            'source': paper.source_file,
-                            'date': paper.publication_date
-                        }
-                    )
-                    search_results.append(result)
-        
-        return search_results
-    
+        q_emb = self.embedding_model.encode(query)
+        results = self.collection.query(query_embeddings=[q_emb.tolist()], n_results=top_k)
+        out = []
+        for i, pid in enumerate(results["ids"][0]):
+            if pid in self.papers:
+                paper = self.papers[pid]
+                passages = self._find_relevant_passages(paper.content, query, top_n=3)
+                out.append(SearchResult(
+                    paper_id=pid,
+                    title=paper.title,
+                    similarity_score=results["distances"][0][i],
+                    relevant_passages=passages,
+                    metadata={"authors": paper.authors, "source": paper.source_file, "date": paper.publication_date},
+                ))
+        return out
+
     def _find_relevant_passages(self, text: str, query: str, top_n: int = 3) -> List[str]:
-        """Find most relevant passages in text for a query"""
-        # Split text into sentences
         sentences = sent_tokenize(text)
-        
         if len(sentences) <= top_n:
-            return [s[:500] for s in sentences]  # Limit passage length
-        
-        # Encode sentences and query
-        sentence_embeddings = self.embedding_model.encode(sentences)
-        query_embedding = self.embedding_model.encode([query])
-        
-        # Calculate similarities
-        similarities = cosine_similarity(query_embedding, sentence_embeddings)[0]
-        
-        # Get top sentences
-        top_indices = similarities.argsort()[-top_n:][::-1]
-        relevant_passages = [sentences[i][:500] for i in top_indices]
-        
-        return relevant_passages
-    
+            return [s[:500] for s in sentences]
+        sent_embs = self.embedding_model.encode(sentences)
+        q_emb = self.embedding_model.encode([query])
+        sims = cosine_similarity(q_emb, sent_embs)[0]
+        return [sentences[i][:500] for i in sims.argsort()[-top_n:][::-1]]
+
     def extract_insights(self, paper_id: str) -> Dict[str, Any]:
-        """
-        Extract comprehensive insights from a paper
-        """
         if paper_id not in self.papers:
             return {"error": "Paper not found"}
-        
         paper = self.papers[paper_id]
-        
-        with st.spinner("Extracting insights..."):
-            # Process with spaCy
-            doc = self.nlp(paper.content[:10000])  # Limit for performance
-            
-            # Extract named entities
+        with st.spinner("🔍 Extracting insights..."):
+            doc = self.nlp(paper.content[:10000])
             entities = defaultdict(list)
             for ent in doc.ents:
                 if ent.label_ in ['PERSON', 'ORG', 'GPE', 'PRODUCT', 'WORK_OF_ART']:
                     entities[ent.label_].append(ent.text)
-            
-            # Remove duplicates
-            for key in entities:
-                entities[key] = list(set(entities[key]))
-            
-            # Extract key terms
+            for k in entities:
+                entities[k] = list(set(entities[k]))
+
             key_terms = self._extract_key_terms(paper.content)
-            
-            # Calculate basic statistics
             word_count = len(paper.content.split())
             sentence_count = len(sent_tokenize(paper.content))
-            
-            # Analyze sentiment (basic implementation)
-            positive_words = ['good', 'excellent', 'effective', 'efficient', 'improved', 'better']
-            negative_words = ['bad', 'poor', 'ineffective', 'inefficient', 'worse', 'limitation']
-            
             text_lower = paper.content.lower()
-            positive_score = sum(text_lower.count(word) for word in positive_words)
-            negative_score = sum(text_lower.count(word) for word in negative_words)
-            
-            # Generate summary
+            pos_words = ['good', 'excellent', 'effective', 'efficient', 'improved', 'better']
+            neg_words = ['bad', 'poor', 'ineffective', 'inefficient', 'worse', 'limitation']
+            pos_score = sum(text_lower.count(w) for w in pos_words)
+            neg_score = sum(text_lower.count(w) for w in neg_words)
+            overall = "Neutral" if pos_score == neg_score else ("Positive" if pos_score > neg_score else "Negative")
+
             summary = self.summarize_paper(paper_id, method="abstractive")
-            
             insights = {
                 "paper_id": paper_id,
                 "title": paper.title,
@@ -628,1012 +668,863 @@ class NLPResearchAssistant:
                 "statistics": {
                     "word_count": word_count,
                     "sentence_count": sentence_count,
-                    "reading_time_minutes": round(word_count / 200)  # Average reading speed
+                    "reading_time_minutes": round(word_count / 200),
                 },
-                "sentiment": {
-                    "positive_score": positive_score,
-                    "negative_score": negative_score,
-                    "overall": "Neutral" if positive_score == negative_score else 
-                              "Positive" if positive_score > negative_score else "Negative"
-                },
-                "recommendations": self._generate_recommendations(paper.content)
+                "sentiment": {"positive_score": pos_score, "negative_score": neg_score, "overall": overall},
+                "recommendations": self._generate_recommendations(paper.content),
             }
-            
-            # Store in session state
             st.session_state.insights[paper_id] = insights
-            
             return insights
-    
+
     def _generate_recommendations(self, text: str) -> List[str]:
-        """Generate reading recommendations based on content"""
-        recommendations = []
-        
-        # Simple rule-based recommendations
-        if any(word in text.lower() for word in ['machine learning', 'neural network', 'deep learning']):
-            recommendations.append("Consider exploring recent advances in transformer architectures")
-        
-        if any(word in text.lower() for word in ['natural language processing', 'nlp', 'text mining']):
-            recommendations.append("Review state-of-the-art in large language models")
-        
-        if any(word in text.lower() for word in ['limitation', 'future work', 'challenge']):
-            recommendations.append("Focus on addressing mentioned limitations in future research")
-        
-        if len(recommendations) < 3:
-            recommendations.extend([
-                "Compare findings with similar studies in the field",
-                "Consider practical applications of the research",
-                "Explore interdisciplinary connections"
-            ])
-        
-        return recommendations[:3]
-    
+        recs = []
+        lower = text.lower()
+        if any(w in lower for w in ['machine learning', 'neural network', 'deep learning']):
+            recs.append("Consider exploring recent advances in transformer architectures.")
+        if any(w in lower for w in ['natural language processing', 'nlp', 'text mining']):
+            recs.append("Review state-of-the-art in large language models.")
+        if any(w in lower for w in ['limitation', 'future work', 'challenge']):
+            recs.append("Focus on addressing mentioned limitations in future research.")
+        while len(recs) < 3:
+            for r in [
+                "Compare findings with similar studies in the field.",
+                "Consider practical applications of the research.",
+                "Explore interdisciplinary connections.",
+            ]:
+                if r not in recs:
+                    recs.append(r)
+                if len(recs) >= 3:
+                    break
+        return recs[:3]
+
     def detect_trends(self, time_window_days: int = None) -> Dict[str, Any]:
-        """
-        Detect trends across all loaded papers
-        """
         time_window_days = time_window_days or self.config.TREND_WINDOW_DAYS
-        
         if len(self.papers) < 2:
-            return {"error": "Need at least 2 papers for trend analysis"}
-        
-        with st.spinner("Analyzing trends..."):
-            # Collect all terms across papers
+            return {"error": "Need at least 2 papers for trend analysis."}
+        with st.spinner("📊 Analyzing trends..."):
             all_terms = []
             paper_dates = []
-            
             for paper in self.papers.values():
-                # Extract key terms from each paper
-                terms = self._extract_key_terms(paper.content, top_n=20)
-                all_terms.extend(terms)
-                
-                # Extract or estimate publication date
+                all_terms.extend(self._extract_key_terms(paper.content, top_n=20))
+                yr = 2023
                 if paper.publication_date:
-                    try:
-                        # Try to parse date (simplified)
-                        year_match = re.search(r'\d{4}', paper.publication_date)
-                        if year_match:
-                            paper_dates.append(int(year_match.group()))
-                    except:
-                        paper_dates.append(2023)  # Default year
-                else:
-                    paper_dates.append(2023)
-            
-            # Analyze term frequency
-            term_counter = Counter(all_terms)
-            top_terms = term_counter.most_common(self.config.TOP_TREND_TERMS)
-            
-            # Calculate trend metrics
+                    m = re.search(r'\d{4}', paper.publication_date)
+                    if m:
+                        yr = int(m.group())
+                paper_dates.append(yr)
+
+            counter = Counter(all_terms)
+            top_terms = counter.most_common(self.config.TOP_TREND_TERMS)
             trends = {
-                "top_terms": [{"term": term, "frequency": freq} for term, freq in top_terms],
+                "top_terms": [{"term": t, "frequency": f} for t, f in top_terms],
                 "total_papers": len(self.papers),
                 "time_range": f"{min(paper_dates)} - {max(paper_dates)}",
                 "analysis_date": datetime.now().strftime("%Y-%m-%d"),
-                "emerging_topics": self._identify_emerging_topics(top_terms)
+                "emerging_topics": self._identify_emerging_topics(top_terms),
             }
-            
-            # Store in session state
             st.session_state.trends = trends
-            
             return trends
-    
-    def _identify_emerging_topics(self, top_terms: List[Tuple[str, int]]) -> List[str]:
-        """Identify potentially emerging topics"""
-        emerging_patterns = [
-            'ai', 'artificial intelligence',
-            'llm', 'large language model',
-            'transformer', 'attention',
-            'ethical', 'bias', 'fairness',
-            'sustainable', 'green',
-            'quantum', 'blockchain', 'metaverse'
-        ]
-        
+
+    def _identify_emerging_topics(self, top_terms):
+        patterns = ['ai', 'llm', 'transformer', 'ethical', 'bias', 'fairness',
+                    'sustainable', 'quantum', 'blockchain', 'metaverse', 'artificial intelligence',
+                    'large language model', 'attention', 'green']
         emerging = []
         for term, _ in top_terms:
-            term_lower = term.lower()
-            for pattern in emerging_patterns:
-                if pattern in term_lower and term not in emerging:
-                    emerging.append(term)
-        
+            if any(p in term.lower() for p in patterns) and term not in emerging:
+                emerging.append(term)
         return emerging[:5]
-    
+
     # ==================== VISUALIZATION FUNCTIONS ====================
-    
+
     def create_wordcloud(self, paper_id: str):
-        """Create word cloud visualization for a paper"""
         if paper_id not in self.papers:
             st.error("Paper not found")
             return None
-        
         paper = self.papers[paper_id]
-        
-        # Generate word cloud
-        wordcloud = WordCloud(
-            width=800,
-            height=400,
-            background_color='white',
-            max_words=100,
-            contour_width=1,
-            contour_color='steelblue'
-        ).generate(paper.content)
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.imshow(wordcloud, interpolation='bilinear')
+        wc = WordCloud(width=1000, height=500, background_color='white', colormap='viridis',
+                       max_words=150, contour_width=2, contour_color='steelblue',
+                       prefer_horizontal=0.8, scale=2, random_state=42).generate(paper.content)
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.imshow(wc, interpolation='bilinear')
         ax.axis('off')
-        ax.set_title(f'Word Cloud: {paper.title[:50]}...', fontsize=14)
-        
+        ax.set_title(f'Word Cloud: {paper.title[:60]}', fontsize=16, fontweight='bold', pad=20)
+        plt.tight_layout()
         return fig
-    
+
     def create_knowledge_graph(self, paper_ids: List[str]):
-        """Create knowledge graph visualization"""
         if not paper_ids:
-            paper_ids = list(self.papers.keys())[:5]  # Limit to first 5 papers
-        
-        # Extract entities and relationships
-        nodes = set()
-        edges = []
-        
-        for paper_id in paper_ids:
-            if paper_id in self.papers:
-                paper = self.papers[paper_id]
-                doc = self.nlp(paper.content[:5000])  # Limit for performance
-                
-                # Add paper as node
-                nodes.add(paper.title[:30])
-                
-                # Extract entities and relationships
+            paper_ids = list(self.papers.keys())[:5]
+        nodes, edges, node_sizes, node_colors = [], [], [], []
+        for pid in paper_ids:
+            if pid in self.papers:
+                nodes.append(self.papers[pid].title[:30])
+                node_sizes.append(30)
+                node_colors.append('#667eea')
+        for pid in paper_ids:
+            if pid in self.papers:
+                paper = self.papers[pid]
+                doc = self.nlp(paper.content[:3000])
                 for ent in doc.ents:
-                    if ent.label_ in ['PERSON', 'ORG', 'GPE']:
-                        nodes.add(ent.text)
-                        edges.append((paper.title[:30], ent.text, ent.label_))
-        
-        # Create graph
+                    if ent.label_ in ['PERSON', 'ORG', 'GPE'] and len(ent.text) > 2:
+                        if ent.text not in nodes:
+                            nodes.append(ent.text)
+                            node_sizes.append(20)
+                            node_colors.append(
+                                '#48bb78' if ent.label_ == 'PERSON' else
+                                '#ed8936' if ent.label_ == 'ORG' else '#4299e1'
+                            )
+                        edges.append((paper.title[:30], ent.text))
+        if not nodes:
+            return None
         G = nx.Graph()
         G.add_nodes_from(nodes)
-        G.add_edges_from([(src, dst) for src, dst, _ in edges])
-        
-        # Create visualization
-        fig, ax = plt.subplots(figsize=(12, 8))
-        pos = nx.spring_layout(G, k=0.5, iterations=50)
-        
-        # Draw nodes
-        nx.draw_networkx_nodes(G, pos, node_size=500, node_color='lightblue', alpha=0.8, ax=ax)
-        
-        # Draw edges
-        nx.draw_networkx_edges(G, pos, width=1, alpha=0.5, edge_color='gray', ax=ax)
-        
-        # Draw labels
-        nx.draw_networkx_labels(G, pos, font_size=10, font_family='sans-serif', ax=ax)
-        
-        ax.set_title("Knowledge Graph of Research Papers")
-        ax.axis('off')
-        
+        G.add_edges_from(edges)
+        pos = nx.spring_layout(G, k=2, iterations=50)
+        ex, ey = [], []
+        for e in G.edges():
+            x0, y0 = pos[e[0]]; x1, y1 = pos[e[1]]
+            ex += [x0, x1, None]; ey += [y0, y1, None]
+        edge_trace = go.Scatter(x=ex, y=ey, line=dict(width=1, color='#cbd5e0'),
+                                hoverinfo='none', mode='lines')
+        nx_list = list(nodes)
+        nx_x = [pos[n][0] for n in nx_list]
+        nx_y = [pos[n][1] for n in nx_list]
+        node_trace = go.Scatter(x=nx_x, y=nx_y, mode='markers+text', text=nx_list,
+                                textposition="top center", hoverinfo='text',
+                                marker=dict(size=node_sizes, color=node_colors,
+                                            line_width=2, line_color='white'))
+        fig = go.Figure(data=[edge_trace, node_trace],
+                        layout=go.Layout(
+                            title='Knowledge Graph', titlefont_size=16, showlegend=False,
+                            hovermode='closest', margin=dict(b=20, l=5, r=5, t=40),
+                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                            plot_bgcolor='white'))
         return fig
-    
+
     def create_trend_chart(self, trends_data: Dict[str, Any]):
-        """Create bar chart for trending terms"""
         if 'top_terms' not in trends_data:
             return None
-        
-        terms = [item['term'] for item in trends_data['top_terms'][:10]]
-        frequencies = [item['frequency'] for item in trends_data['top_terms'][:10]]
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        bars = ax.barh(terms, frequencies, color='steelblue')
-        ax.set_xlabel('Frequency')
-        ax.set_title('Top Trending Terms')
-        ax.invert_yaxis()  # Highest frequency at top
-        
-        # Add value labels
-        for bar in bars:
-            width = bar.get_width()
-            ax.text(width, bar.get_y() + bar.get_height()/2, 
-                   f' {width}', va='center')
-        
+        items = trends_data['top_terms'][:10]
+        terms = [i['term'] for i in items]
+        freqs = [i['frequency'] for i in items]
+        fig = go.Figure(data=[go.Bar(
+            x=freqs, y=terms, orientation='h',
+            marker=dict(color=freqs, colorscale='Viridis',
+                        line=dict(color='rgb(8,48,107)', width=1)),
+            text=freqs, textposition='auto',
+        )])
+        fig.update_layout(
+            title='Top Trending Terms', xaxis_title='Frequency', yaxis_title='Terms',
+            yaxis={'categoryorder': 'total ascending'}, template='plotly_white',
+            height=500, margin=dict(l=150, r=50, t=50, b=50))
         return fig
-    
+
     # ==================== STREAMLIT UI COMPONENTS ====================
-    
+
     def render_sidebar(self):
-        """Render the sidebar with navigation and info"""
         with st.sidebar:
-            st.title("🔬 NLP Research Assistant")
+            st.markdown("""
+            <div style='text-align:center;padding:1rem 0;'>
+                <h1 style='font-size:1.8rem;font-weight:700;
+                    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                    -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0;'>
+                    🔬 NLP Research Assistant
+                </h1>
+                <p style='color:var(--card-subtext);font-size:0.9rem;margin:0.5rem 0;'>
+                    AI-Powered Document Analysis
+                </p>
+            </div>""", unsafe_allow_html=True)
             st.markdown("---")
-            
-            st.markdown("### 📚 Navigation")
-            page = st.radio(
-                "Go to",
-                ["🏠 Home", "📄 Document Analysis", "🔍 Semantic Search", 
-                 "📊 Trend Analysis", "📈 Visualizations", "⚙️ Settings"]
-            )
-            
+
+            st.markdown("### 📱 Navigation")
+            page = st.radio("Go to",
+                ["🏠 Dashboard", "📄 Paper Analyzer", "🔍 Semantic Search",
+                 "📊 Trends Explorer", "🎨 Visualizations", "⚙️ Settings"],
+                label_visibility="collapsed")
             st.markdown("---")
-            st.markdown("### 📊 Statistics")
-            st.metric("Papers Loaded", len(self.papers))
-            
-            if self.papers:
-                st.metric("Total Content", f"{sum(len(p.content) for p in self.papers.values()):,} chars")
-            
-            st.markdown("---")
-            st.markdown("### ℹ️ About")
-            st.info("""
-            This NLP Research Assistant helps analyze research papers with:
-            - PDF text extraction
-            - Automatic summarization
-            - Semantic search
-            - Trend detection
-            - Interactive visualizations
-            """)
-            
-            # Quick actions
-            st.markdown("---")
-            st.markdown("### ⚡ Quick Actions")
+
+            st.markdown("### 📈 Statistics")
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("🔄 Clear All", use_container_width=True):
+                st.metric("Papers", len(self.papers))
+            with col2:
+                total = sum(len(p.content) for p in self.papers.values()) if self.papers else 0
+                st.metric("Chars", f"{total:,}" if total < 1_000_000 else f"{total//1000}K")
+            st.markdown("---")
+
+            st.markdown("### 📤 Quick Upload")
+            uploaded = st.file_uploader("Drag & drop PDFs", type="pdf",
+                                        accept_multiple_files=True,
+                                        label_visibility="collapsed")
+            if uploaded:
+                success = 0
+                with st.spinner(f"Processing {len(uploaded)} file(s)..."):
+                    for f in uploaded:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                            tmp.write(f.getvalue())
+                            tmp_path = tmp.name
+                        if self.load_pdf(tmp_path):
+                            success += 1
+                        os.unlink(tmp_path)
+                if success:
+                    st.success(f"✅ Added {success} paper(s)!")
+                    st.rerun()
+            st.markdown("---")
+
+            if self.papers:
+                st.markdown("### 📚 Recent Papers")
+                for pid, paper in list(self.papers.items())[:3]:
+                    st.markdown(f"""
+                    <div class='paper-card'>
+                        <strong>{paper.title[:40]}...</strong><br>
+                        <small style='color:var(--card-subtext);'>{', '.join(paper.authors[:1]) if paper.authors else 'Unknown'}</small>
+                    </div>""", unsafe_allow_html=True)
+            st.markdown("---")
+
+            st.markdown("### 🟢 System Status")
+            st.info(f"**Status:** {'🟢 Active' if self.papers else '🟡 Ready'}")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Refresh", key="sidebar_refresh", use_container_width=True):
+                    st.rerun()
+            with col2:
+                if st.button("🗑️ Clear", key="sidebar_clear", use_container_width=True):
                     self.papers.clear()
                     st.session_state.clear()
                     st.rerun()
-            
-            with col2:
-                if st.button("💾 Save State", use_container_width=True):
-                    self.save_state()
-                    st.success("State saved!")
-            
             return page
-    
+
     def render_home_page(self):
-        """Render the home page"""
-        st.title("🏠 Welcome to NLP Research Assistant")
-        
-        col1, col2 = st.columns([2, 1])
-        
+        col1, col2 = st.columns([3, 1])
         with col1:
-            st.markdown("""
-            ### Transform Your Research Workflow
-            
-            An intelligent assistant for analyzing academic papers using cutting-edge NLP.
-            
-            **Key Features:**
-            - 📥 **Upload & Process PDFs** - Extract text from research papers
-            - 📝 **Automatic Summarization** - Get concise summaries of complex papers
-            - 🔍 **Semantic Search** - Find relevant content across all papers
-            - 📊 **Trend Analysis** - Identify emerging topics and patterns
-            - 🎨 **Interactive Visualizations** - Word clouds, knowledge graphs, and more
-            - 🤖 **AI-Powered Insights** - Key terms, entities, and recommendations
-            
-            **Get Started:**
-            1. Upload PDFs in the **Document Analysis** section
-            2. Explore papers with **Semantic Search**
-            3. Generate insights and visualizations
-            """)
-        
+            st.markdown("<h1 class='main-header'>📊 Research Analytics Dashboard</h1>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size:1.1rem;color:#4a5568;margin-bottom:2rem;'>Transform your research workflow with AI-powered document analysis.</p>", unsafe_allow_html=True)
         with col2:
-            st.image("https://th.bing.com/th/id/R.26fdcdd198ee8c489f37343769657d5a?rik=4yvj2ukyHDLfGQ&pid=ImgRaw&r=0", 
-                    use_column_width=True, caption="AI-Powered Research")
-            
-            # Quick upload
-            st.markdown("### Quick Upload")
-            uploaded_files = st.file_uploader(
-                "Drag & drop PDFs here",
-                type="pdf",
-                accept_multiple_files=True,
-                label_visibility="collapsed"
-            )
-            
-            if uploaded_files:
-                with st.spinner(f"Processing {len(uploaded_files)} file(s)..."):
-                    for uploaded_file in uploaded_files:
-                        # Save to temp file
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                            tmp_file.write(uploaded_file.getvalue())
-                            tmp_path = tmp_file.name
-                        
-                        # Load the PDF
-                        paper = self.load_pdf(tmp_path)
-                        
-                        # Clean up temp file
-                        os.unlink(tmp_path)
-                
-                st.success(f"Successfully loaded {len(uploaded_files)} paper(s)!")
-                st.rerun()
-        
-        # Recent activity
+            st.markdown(f"""
+            <div style='text-align:center;padding:1rem;background:linear-gradient(135deg,#f8fafc,#edf2f7);
+                border-radius:12px;border:1px solid #e2e8f0;'>
+                <h3 style='color:var(--card-text);margin:0;'>{len(self.papers)}</h3>
+                <p style='color:var(--card-subtext);margin:0;font-size:0.9rem;'>Papers Loaded</p>
+            </div>""", unsafe_allow_html=True)
+
         if self.papers:
-            st.markdown("---")
-            st.markdown("### 📋 Recent Papers")
-            
-            # Display papers in a grid
-            cols = st.columns(3)
-            for idx, (paper_id, paper) in enumerate(list(self.papers.items())[:6]):
-                with cols[idx % 3]:
-                    with st.container(border=True):
-                        st.markdown(f"**{paper.title[:50]}...**")
-                        st.caption(f"Authors: {', '.join(paper.authors[:2]) if paper.authors else 'Unknown'}")
-                        st.caption(f"ID: {paper_id[:8]}...")
-                        
-                        if st.button("Analyze", key=f"analyze_{paper_id}", use_container_width=True):
-                            st.session_state.current_paper = paper_id
-                            st.switch_page("Document Analysis")
-    
+            st.markdown("<h3 class='sub-header'>📈 Quick Statistics</h3>", unsafe_allow_html=True)
+            cols = st.columns(4)
+            total_words = sum(len(p.content.split()) for p in self.papers.values())
+            for idx, (label, value, color) in enumerate([
+                ("Total Papers", len(self.papers), "#4299e1"),
+                ("Total Words", f"{total_words:,}", "#48bb78"),
+                ("Avg Length", f"{total_words // len(self.papers):,}", "#ed8936"),
+                ("Latest", datetime.now().strftime("%b %d"), "#9f7aea"),
+            ]):
+                with cols[idx]:
+                    st.markdown(f"""
+                    <div class='metric-card'>
+                        <div class='metric-value' style='color:{color};'>{value}</div>
+                        <div class='metric-label'>{label}</div>
+                    </div>""", unsafe_allow_html=True)
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.markdown("<h3 class='sub-header'>📚 Featured Papers</h3>", unsafe_allow_html=True)
+            if self.papers:
+                for pid, paper in list(self.papers.items())[:3]:
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.markdown(themed(f"""
+                        <div style='padding:1rem;background:var(--card-bg);color:var(--card-text);border-radius:8px;
+                            border:1px solid var(--card-border);margin-bottom:1rem;'>
+                            <h4 style='margin:0 0 0.5rem 0;color:var(--card-text);'>{paper.title[:70]}</h4>
+                            <p style='margin:0 0 0.5rem 0;color:var(--card-subtext);font-size:0.9rem;'>
+                                {', '.join(paper.authors[:2]) if paper.authors else 'Unknown authors'}
+                            </p>
+                            <span class='tag'>📄 PDF</span>
+                            <span class='tag'>{len(paper.content.split()):,} words</span>
+                        </div>"""), unsafe_allow_html=True)
+                    with c2:
+                        if st.button("Analyze", key=f"analyze_{pid}", use_container_width=True):
+                            st.session_state.current_paper = pid
+                            st.session_state['page'] = "📄 Paper Analyzer"
+                            st.rerun()
+            else:
+                st.info("📥 No papers loaded yet. Upload some PDFs to get started!")
+
+            st.markdown("<h3 class='sub-header'>⚡ Quick Actions</h3>", unsafe_allow_html=True)
+            ac = st.columns(3)
+            with ac[0]:
+                if st.button("📊 Generate Trends", key="home_trends", use_container_width=True, disabled=len(self.papers) < 2):
+                    st.session_state['page'] = "📊 Trends Explorer"; st.rerun()
+            with ac[1]:
+                if st.button("🔍 Search Papers", key="home_search", use_container_width=True, disabled=not self.papers):
+                    st.session_state['page'] = "🔍 Semantic Search"; st.rerun()
+            with ac[2]:
+                if st.button("🎨 Create Visuals", key="home_visuals", use_container_width=True, disabled=not self.papers):
+                    st.session_state['page'] = "🎨 Visualizations"; st.rerun()
+
+        with col2:
+            st.markdown("<h3 class='sub-header'>📤 Upload Panel</h3>", unsafe_allow_html=True)
+            uploaded = st.file_uploader("Drop PDFs here", type="pdf",
+                                        accept_multiple_files=True, label_visibility="collapsed")
+            if uploaded:
+                bar = st.progress(0)
+                status = st.empty()
+                for idx, f in enumerate(uploaded):
+                    status.text(f"Processing: {f.name[:30]}...")
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                        tmp.write(f.getvalue())
+                        tmp_path = tmp.name
+                    self.load_pdf(tmp_path)
+                    os.unlink(tmp_path)
+                    bar.progress((idx + 1) / len(uploaded))
+                bar.empty(); status.empty()
+                st.success(f"✅ Processed {len(uploaded)} file(s)!")
+                st.rerun()
+
+            st.markdown("<h3 class='sub-header'>🕐 Recent Activity</h3>", unsafe_allow_html=True)
+            for activity, t in [("System initialized", "Just now"),
+                                  ("Models loaded", "Just now"),
+                                  (f"{len(self.papers)} papers available", "Ongoing")]:
+                st.markdown(f"""
+                <div style='display:flex;justify-content:space-between;
+                    padding:0.5rem 0;border-bottom:1px solid var(--activity-border);'>
+                    <span>{activity}</span>
+                    <span style='color:var(--card-subtext);font-size:0.9rem;'>{t}</span>
+                </div>""", unsafe_allow_html=True)
+
     def render_document_analysis_page(self):
-        """Render the document analysis page"""
-        st.title("📄 Document Analysis")
-        
+        st.markdown("<h1 class='main-header'>📄 Paper Analyzer</h1>", unsafe_allow_html=True)
         if not self.papers:
-            st.warning("No papers loaded. Please upload PDFs first.")
-            return
-        
-        # Paper selection
-        paper_options = {f"{p.title[:50]}... (ID: {pid})": pid for pid, p in self.papers.items()}
-        selected_option = st.selectbox(
-            "Select a paper to analyze:",
-            options=list(paper_options.keys()),
-            index=0
-        )
-        
-        selected_paper_id = paper_options[selected_option]
-        paper = self.papers[selected_paper_id]
-        
-        # Store current paper in session state
-        st.session_state.current_paper = selected_paper_id
-        
-        # Paper metadata
-        with st.expander("📋 Paper Information", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Title", paper.title)
-                st.metric("Authors", ", ".join(paper.authors) if paper.authors else "Unknown")
-            
-            with col2:
-                st.metric("Publication Date", paper.publication_date or "Unknown")
-                st.metric("Keywords", ", ".join(paper.keywords[:5]) if paper.keywords else "None")
-        
-        # Analysis tabs
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Summary", "🔑 Key Insights", "🏷️ Named Entities", "💡 Recommendations"])
-        
+            st.warning("⚠️ No papers loaded. Please upload PDFs first."); return
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            options = {f"{p.title[:70]}...": pid for pid, p in self.papers.items()}
+            selected_opt = st.selectbox("Select a paper:", list(options.keys()), key="paper_selector")
+        with col2:
+            if st.button("🔄 Refresh Analysis", key="analyzer_refresh", use_container_width=True):
+                pid = options[selected_opt]
+                st.session_state.insights.pop(pid, None)
+                st.rerun()
+
+        pid = options[selected_opt]
+        paper = self.papers[pid]
+        st.session_state.current_paper = pid
+
+        st.markdown(themed(f"""
+        <div style='background:var(--paper-meta-bg);color:var(--card-text);border-radius:12px;
+            padding:1.5rem;margin-bottom:2rem;border:1px solid var(--card-border);'>
+            <h3 style='margin-top:0;color:var(--card-text);'>{paper.title}</h3>
+            <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;'>
+                <div><strong style='color:var(--card-subtext);'>👤 Authors</strong><br>
+                    <span style='color:var(--card-text);'>{', '.join(paper.authors[:3]) + ('...' if len(paper.authors)>3 else '') if paper.authors else 'Unknown'}</span></div>
+                <div><strong style='color:var(--card-subtext);'>📅 Date</strong><br>
+                    <span style='color:var(--card-text);'>{paper.publication_date or 'Unknown'}</span></div>
+                <div><strong style='color:var(--card-subtext);'>📏 Length</strong><br>
+                    <span style='color:var(--card-text);'>{len(paper.content.split()):,} words</span></div>
+                <div><strong style='color:var(--card-subtext);'>🔑 Keywords</strong><br>
+                    <span style='color:var(--card-text);'>{', '.join(paper.keywords[:5]) if paper.keywords else 'None'}</span></div>
+            </div>
+        </div>"""), unsafe_allow_html=True)
+
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            ["📝 Summary", "🔍 Insights", "🏷️ Entities", "💡 Recommendations", "📊 Overview"])
+
         with tab1:
-            st.subheader("Paper Summary")
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                summary_method = st.radio(
-                    "Summary Method:",
-                    ["Abstractive (AI)", "Extractive (Traditional)"],
-                    horizontal=True
-                )
-            
-            with col2:
-                if st.button("Generate Summary", type="primary"):
-                    method = "abstractive" if summary_method == "Abstractive (AI)" else "extractive"
-                    with st.spinner("Generating summary..."):
-                        summary = self.summarize_paper(selected_paper_id, method)
-                        
-                        st.markdown("### 📋 Summary")
-                        st.write(summary)
-                        
-                        # Save summary
-                        if st.button("💾 Save Summary"):
-                            filename = f"summary_{selected_paper_id}.txt"
-                            with open(filename, 'w') as f:
-                                f.write(f"Title: {paper.title}\n\n")
-                                f.write(f"Summary:\n{summary}")
-                            st.success(f"Summary saved to {filename}")
-        
+            st.markdown("<h3 class='sub-header'>AI-Powered Summary</h3>", unsafe_allow_html=True)
+            c1, c2, c3 = st.columns([2, 1, 1])
+            with c1:
+                method = st.radio("Method:", ["🤖 Abstractive (AI)", "📋 Extractive (Traditional)"], horizontal=True)
+            with c2:
+                st.select_slider("Length:", ["Short", "Medium", "Long"], value="Medium")
+            with c3:
+                gen_btn = st.button("✨ Generate Summary", key="gen_summary", type="primary", use_container_width=True)
+
+            if gen_btn:
+                with st.spinner("🤖 Generating summary..."):
+                    m = "abstractive" if method.startswith("🤖") else "extractive"
+                    summary = self.summarize_paper(pid, m)
+                    st.session_state.summary_generated = True
+                    st.session_state.current_summary = summary
+                    st.markdown(f"<div class='summary-box'><h4 style='color:var(--summary-text);margin-top:0;'>📋 Summary</h4>{summary}</div>",
+                                unsafe_allow_html=True)
+                    ca, cb, cc = st.columns(3)
+                    with ca:
+                        if st.button("📋 Copy", key="copy_summary", use_container_width=True):
+                            st.code(summary, language="text")
+                    with cb:
+                        if st.button("💾 Save", key="save_summary", use_container_width=True):
+                            fn = f"summary_{pid}.txt"
+                            with open(fn, 'w') as f:
+                                f.write(f"Title: {paper.title}\n\nSummary:\n{summary}")
+                            st.success(f"✅ Saved to {fn}")
+                    with cc:
+                        if st.button("☁️ Word Cloud", key="summary_wc", use_container_width=True):
+                            st.session_state['page'] = "🎨 Visualizations"; st.rerun()
+            elif st.session_state.summary_generated:
+                st.markdown(f"<div class='summary-box'><h4 style='color:var(--summary-text);margin-top:0;'>📋 Previous Summary</h4>{st.session_state.current_summary}</div>",
+                            unsafe_allow_html=True)
+
         with tab2:
-            st.subheader("Key Insights")
-            
-            if st.button("Extract Insights", type="primary"):
-                insights = self.extract_insights(selected_paper_id)
-                
-                if "error" not in insights:
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Word Count", insights['statistics']['word_count'])
-                    
-                    with col2:
-                        st.metric("Sentences", insights['statistics']['sentence_count'])
-                    
-                    with col3:
-                        st.metric("Reading Time", f"{insights['statistics']['reading_time_minutes']} min")
-                    
-                    # Key terms
-                    st.markdown("### 🔑 Key Terms")
-                    tags = " ".join([f"`{term}`" for term in insights['key_terms'][:10]])
-                    st.markdown(tags)
-                    
-                    # Sentiment
-                    st.markdown("### 😊 Sentiment Analysis")
-                    sentiment_cols = st.columns(3)
-                    with sentiment_cols[0]:
-                        st.metric("Positive Score", insights['sentiment']['positive_score'])
-                    with sentiment_cols[1]:
-                        st.metric("Negative Score", insights['sentiment']['negative_score'])
-                    with sentiment_cols[2]:
-                        st.metric("Overall", insights['sentiment']['overall'])
-        
+            st.markdown("<h3 class='sub-header'>Deep Insights</h3>", unsafe_allow_html=True)
+            if st.button("🔍 Extract Insights", key="extract_insights", type="primary", use_container_width=True):
+                ins = self.extract_insights(pid)
+                if "error" not in ins:
+                    cols = st.columns(4)
+                    for i, (lbl, val, clr) in enumerate([
+                        ("Word Count", ins['statistics']['word_count'], "#4299e1"),
+                        ("Sentences", ins['statistics']['sentence_count'], "#48bb78"),
+                        ("Reading Time", f"{ins['statistics']['reading_time_minutes']} min", "#ed8936"),
+                        ("Key Terms", len(ins['key_terms']), "#9f7aea"),
+                    ]):
+                        with cols[i]:
+                            st.markdown(themed(f"<div class='metric-card'><div class='metric-value' style='color:{clr};'>{val}</div><div class='metric-label'>{lbl}</div></div>"),
+                                        unsafe_allow_html=True)
+
+                    st.markdown("#### 😊 Sentiment Analysis")
+                    sc = st.columns(3)
+                    with sc[0]:
+                        st.markdown(themed("<div style='text-align:center;padding:1rem;background:#c6f6d5;border-radius:8px;border:1px solid #9ae6b4;'>"
+                            f"<div style='font-size:2rem;color:#22543d;font-weight:700;'>{ins['sentiment']['positive_score']}</div>"
+                            "<div style='color:#22543d;font-weight:600;'>Positive</div></div>"), unsafe_allow_html=True)
+                    with sc[1]:
+                        st.markdown(themed("<div style='text-align:center;padding:1rem;background:#fed7d7;border-radius:8px;border:1px solid #fc8181;'>"
+                            f"<div style='font-size:2rem;color:#9b2c2c;font-weight:700;'>{ins['sentiment']['negative_score']}</div>"
+                            "<div style='color:#9b2c2c;font-weight:600;'>Negative</div></div>"), unsafe_allow_html=True)
+                    with sc[2]:
+                        oc = {"Positive": "#48bb78", "Negative": "#f56565", "Neutral": "#a0aec0"}[ins['sentiment']['overall']]
+                        st.markdown(themed(f"<div style='text-align:center;padding:1rem;background:{oc}33;border-radius:8px;border:1px solid {oc};'>"
+                            f"<div style='font-size:2rem;color:{oc};font-weight:700;'>{ins['sentiment']['overall'][0]}</div>"
+                            f"<div style='color:{oc};font-weight:600;'>{ins['sentiment']['overall']}</div></div>"), unsafe_allow_html=True)
+
+                    st.markdown("#### 🔑 Key Terms")
+                    html_tags = "".join(f"<span class='tag tag-primary'>{t}</span>" for t in ins['key_terms'][:15])
+                    st.markdown(themed(f"<div style='margin:1rem 0;'>{html_tags}</div>"), unsafe_allow_html=True)
+
         with tab3:
-            st.subheader("Named Entities")
-            
-            if selected_paper_id in st.session_state.insights:
-                insights = st.session_state.insights[selected_paper_id]
-                entities = insights.get('entities', {})
-                
+            st.markdown("<h3 class='sub-header'>Named Entities</h3>", unsafe_allow_html=True)
+            if pid in st.session_state.insights:
+                entities = st.session_state.insights[pid].get('entities', {})
                 if entities:
-                    for entity_type, entity_list in entities.items():
-                        with st.expander(f"🏷️ {entity_type} ({len(entity_list)})"):
-                            cols = st.columns(3)
-                            for i, entity in enumerate(entity_list):
-                                with cols[i % 3]:
-                                    st.info(entity)
+                    ec = st.columns(3)
+                    for idx, (etype, (dname, clr)) in enumerate({
+                        'PERSON': ('👤 People', '#4299e1'), 'ORG': ('🏢 Organizations', '#48bb78'),
+                        'GPE': ('🌍 Locations', '#ed8936'), 'PRODUCT': ('📦 Products', '#9f7aea'),
+                        'WORK_OF_ART': ('🎨 Works', '#ed64a6')
+                    }.items()):
+                        if etype in entities and entities[etype]:
+                            with ec[idx % 3]:
+                                # Fixed: explicit color on each item + quotes around padding value
+                                items_html = "".join(
+                                    f"<div style='padding:0.25rem 0;color:var(--card-text);'>• {e}</div>"
+                                    for e in entities[etype][:10]
+                                )
+                                st.markdown(themed(
+                                    f"<div style='background:var(--entity-bg);border-radius:8px;padding:1rem;"
+                                    f"border:1px solid var(--card-border);margin-bottom:1rem;'>"
+                                    f"<h4 style='color:{clr};margin:0 0 0.5rem 0;'>{dname}</h4>"
+                                    f"{items_html}</div>"
+                                ), unsafe_allow_html=True)
                 else:
                     st.info("No named entities found.")
             else:
-                st.info("Click 'Extract Insights' to analyze named entities.")
-        
+                st.info("Click 'Extract Insights' first.")
+
         with tab4:
-            st.subheader("Recommendations")
-            
-            if selected_paper_id in st.session_state.insights:
-                insights = st.session_state.insights[selected_paper_id]
-                recommendations = insights.get('recommendations', [])
-                
-                for i, rec in enumerate(recommendations, 1):
-                    with st.container(border=True):
-                        st.markdown(f"**{i}. {rec}**")
-                        st.progress(min((i * 20), 100))
+            st.markdown("<h3 class='sub-header'>Research Recommendations</h3>", unsafe_allow_html=True)
+            if pid in st.session_state.insights:
+                for i, rec in enumerate(st.session_state.insights[pid].get('recommendations', []), 1):
+                    st.markdown(f"""
+                    <div style='background:var(--rec-bg);color:var(--card-text);border-radius:8px;
+                        padding:1rem;margin-bottom:1rem;border-left:4px solid #667eea;'>
+                        <div style='display:flex;align-items:center;gap:1rem;'>
+                            <div style='background:#667eea;color:white;width:30px;height:30px;border-radius:50%;
+                                display:flex;align-items:center;justify-content:center;font-weight:bold;'>{i}</div>
+                            <div>{rec}</div>
+                        </div>
+                    </div>""", unsafe_allow_html=True)
             else:
-                st.info("Click 'Extract Insights' to get recommendations.")
-        
-        # Quick actions
-        st.markdown("---")
-        st.markdown("### ⚡ Quick Actions")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("📊 Generate Word Cloud", use_container_width=True):
-                fig = self.create_wordcloud(selected_paper_id)
-                if fig:
-                    st.pyplot(fig)
-        
-        with col2:
-            if st.button("📄 View Full Text", use_container_width=True):
-                with st.expander("Full Paper Content", expanded=True):
-                    st.text_area("Content", paper.content[:5000], height=300)
-        
-        with col3:
-            if st.button("💾 Export Report", use_container_width=True):
-                report = self.generate_report(selected_paper_id)
-                st.download_button(
-                    label="Download Report",
-                    data=report,
-                    file_name=f"report_{selected_paper_id}.txt",
-                    mime="text/plain"
-                )
-    
+                st.info("Extract insights first to get recommendations.")
+
+        with tab5:
+            st.markdown("<h3 class='sub-header'>Paper Overview</h3>", unsafe_allow_html=True)
+            with st.expander("📄 View Paper Content (First 1000 chars)", expanded=False):
+                st.text_area("Content", paper.content[:1000], height=200, label_visibility="collapsed")
+            ac = st.columns(4)
+            with ac[0]:
+                if st.button("☁️ Word Cloud", key="overview_wc", use_container_width=True):
+                    fig = self.create_wordcloud(pid)
+                    if fig: st.pyplot(fig)
+            with ac[1]:
+                if st.button("📊 Export Report", key="export_report", use_container_width=True):
+                    report = self.generate_report(pid)
+                    st.download_button("Download", data=report,
+                                       file_name=f"report_{pid}.txt", mime="text/plain",
+                                       use_container_width=True)
+            with ac[2]:
+                if st.button("🔗 Similar Papers", key="similar_papers", use_container_width=True):
+                    st.session_state['page'] = "🔍 Semantic Search"; st.rerun()
+            with ac[3]:
+                if st.button("📈 Trends", key="overview_trends", use_container_width=True):
+                    st.session_state['page'] = "📊 Trends Explorer"; st.rerun()
+
     def render_search_page(self):
-        """Render the semantic search page"""
-        st.title("🔍 Semantic Search")
-        
+        st.markdown("<h1 class='main-header'>🔍 Semantic Search</h1>", unsafe_allow_html=True)
         if not self.papers:
-            st.warning("No papers loaded. Please upload PDFs first.")
-            return
-        
-        # Search interface
+            st.warning("⚠️ No papers loaded. Please upload PDFs first."); return
+
         col1, col2 = st.columns([4, 1])
         with col1:
-            query = st.text_input(
-                "Search across all papers:",
-                placeholder="Enter your research query...",
-                key="search_query"
-            )
-        
+            query = st.text_input("Search:", placeholder="Enter topic, question, or keyword...",
+                                  key="search_query_main", label_visibility="collapsed")
         with col2:
-            top_k = st.number_input(
-                "Results",
-                min_value=1,
-                max_value=20,
-                value=self.config.TOP_K_RESULTS,
-                step=1
-            )
-        
-        if st.button("🔍 Search", type="primary", use_container_width=True):
-            if query:
-                with st.spinner(f"Searching across {len(self.papers)} papers..."):
-                    results = self.semantic_search(query, top_k)
-                    st.session_state.search_results = results
-            else:
-                st.warning("Please enter a search query.")
-        
-        # Display results
+            top_k = st.number_input("Results", min_value=1, max_value=20, value=5,
+                                    step=1, label_visibility="collapsed")
+
+        sc = st.columns([1, 1, 6])
+        with sc[0]:
+            search_btn = st.button("🔍 Search", key="search_btn", type="primary", use_container_width=True)
+        with sc[1]:
+            if st.button("🔄 Clear", key="search_clear", use_container_width=True):
+                st.session_state.search_results = []; st.rerun()
+
+        if search_btn and query:
+            with st.spinner(f"Searching {len(self.papers)} papers..."):
+                st.session_state.search_results = self.semantic_search(query, top_k)
+
         if st.session_state.search_results:
-            st.markdown(f"### 📊 Found {len(st.session_state.search_results)} results")
-            
+            st.markdown(f"<div style='background:linear-gradient(135deg,#bee3f8,#90cdf4);border-radius:8px;padding:1rem;margin:1rem 0;border:1px solid #4299e1;'><h4 style='margin:0;color:#2c5282;'>📊 {len(st.session_state.search_results)} results for: \"{query}\"</h4></div>",
+                        unsafe_allow_html=True)
             for i, result in enumerate(st.session_state.search_results):
-                with st.container(border=True):
-                    # Header with similarity score
-                    similarity_color = "green" if result.similarity_score > 0.8 else "orange" if result.similarity_score > 0.6 else "red"
-                    
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        st.markdown(f"**{i+1}. {result.title}**")
-                        st.caption(f"Authors: {result.metadata.get('authors', 'Unknown')}")
-                    
-                    with col2:
-                        st.metric(
-                            "Similarity",
-                            f"{result.similarity_score:.3f}",
-                            delta_color="off"
-                        )
-                    
-                    # Relevant passages
-                    with st.expander("View relevant passages"):
-                        for j, passage in enumerate(result.relevant_passages):
-                            st.markdown(f"**Passage {j+1}:**")
-                            st.info(passage)
-                    
-                    # Actions
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        if st.button("📄 View Paper", key=f"view_{result.paper_id}"):
-                            st.session_state.current_paper = result.paper_id
-                            st.switch_page("Document Analysis")
-                    
-                    with col2:
-                        if st.button("📝 Summary", key=f"summary_{result.paper_id}"):
-                            with st.spinner("Generating summary..."):
-                                summary = self.summarize_paper(result.paper_id)
-                                st.info(summary)
-                    
-                    with col3:
-                        if st.button("💾 Save Result", key=f"save_{result.paper_id}"):
-                            # Save result to file
-                            filename = f"search_result_{result.paper_id}.txt"
-                            with open(filename, 'w') as f:
-                                f.write(f"Query: {query}\n")
-                                f.write(f"Paper: {result.title}\n")
-                                f.write(f"Similarity: {result.similarity_score}\n\n")
-                                f.write("Relevant Passages:\n")
-                                for passage in result.relevant_passages:
-                                    f.write(f"- {passage}\n")
-                            st.success(f"Saved to {filename}")
-        elif query and not st.session_state.search_results:
-            st.info("No results found. Try a different query.")
-    
+                sc_clr = "#48bb78" if result.similarity_score > 0.8 else ("#ed8936" if result.similarity_score > 0.6 else "#f56565")
+                sc_lbl = "Excellent" if result.similarity_score > 0.8 else ("Good" if result.similarity_score > 0.6 else "Fair")
+                st.markdown(f"""
+                <div style='background:var(--search-card-bg);color:var(--card-text);border-radius:10px;padding:1.5rem;margin:1rem 0;
+                    border:1px solid var(--card-border);border-left:4px solid {sc_clr};'>
+                    <div style='display:flex;justify-content:space-between;align-items:start;'>
+                        <div><h3 style='margin:0 0 0.5rem 0;color:var(--card-text);'>#{i+1} {result.title}</h3>
+                            <div style='color:var(--card-subtext);font-size:0.9rem;margin-bottom:1rem;'>
+                                📅 {result.metadata.get('date','Unknown')}</div></div>
+                        <div style='text-align:right;'>
+                            <div style='font-size:1.5rem;font-weight:bold;color:{sc_clr};'>{result.similarity_score:.3f}</div>
+                            <div style='color:{sc_clr};font-size:0.8rem;'>{sc_lbl}</div>
+                        </div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+                with st.expander("📖 Relevant passages"):
+                    for j, passage in enumerate(result.relevant_passages):
+                        st.markdown(f"<div style='background:var(--passage-bg);color:var(--card-text);border-radius:6px;padding:1rem;margin:0.5rem 0;border:1px solid var(--card-border);'><small style='color:var(--card-subtext);'>📌 Passage {j+1}</small><br>{passage}</div>", unsafe_allow_html=True)
+                ac = st.columns(4)
+                with ac[0]:
+                    if st.button("📄 Analyze", key=f"an_{result.paper_id}", use_container_width=True):
+                        st.session_state.current_paper = result.paper_id
+                        st.session_state['page'] = "📄 Paper Analyzer"; st.rerun()
+                with ac[1]:
+                    if st.button("📝 Summary", key=f"sm_{result.paper_id}", use_container_width=True):
+                        with st.spinner("Generating..."):
+                            st.info(self.summarize_paper(result.paper_id))
+                with ac[2]:
+                    if st.button("💾 Save", key=f"sv_{result.paper_id}", use_container_width=True):
+                        fn = f"result_{result.paper_id}.txt"
+                        with open(fn, 'w') as f:
+                            f.write(f"Query: {query}\nPaper: {result.title}\nScore: {result.similarity_score}\n\n")
+                            f.write("\n".join(result.relevant_passages))
+                        st.success(f"✅ Saved to {fn}")
+                with ac[3]:
+                    if st.button("📊 Compare", key=f"cp_{result.paper_id}", use_container_width=True):
+                        st.info("Comparison coming soon!")
+                st.markdown("---")
+
     def render_trends_page(self):
-        """Render the trend analysis page"""
-        st.title("📊 Trend Analysis")
-        
+        st.markdown("<h1 class='main-header'>📊 Trends Explorer</h1>", unsafe_allow_html=True)
         if len(self.papers) < 2:
-            st.warning("Need at least 2 papers for trend analysis.")
-            return
-        
-        # Analysis controls
-        col1, col2 = st.columns(2)
-        with col1:
-            window_days = st.slider(
-                "Analysis Window (days)",
-                min_value=7,
-                max_value=365,
-                value=self.config.TREND_WINDOW_DAYS,
-                step=7
-            )
-        
-        with col2:
-            top_terms = st.slider(
-                "Top Terms to Show",
-                min_value=5,
-                max_value=20,
-                value=self.config.TOP_TREND_TERMS,
-                step=1
-            )
-        
-        if st.button("📈 Analyze Trends", type="primary", use_container_width=True):
-            with st.spinner("Analyzing trends across all papers..."):
-                trends = self.detect_trends(window_days)
-                st.session_state.trends = trends
-        
-        # Display trends
+            st.warning("⚠️ Need at least 2 papers for trend analysis."); return
+
+        st.markdown("<h3 class='sub-header'>Analysis Configuration</h3>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            window = st.slider("Time Window (days)", 7, 365, 30, 7)
+        with c2:
+            top_n = st.slider("Terms to Show", 5, 20, 10, 1)
+        with c3:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            if st.button("📈 Analyze Trends", key="analyze_trends_btn", type="primary", use_container_width=True):
+                st.session_state.trends = self.detect_trends(window)
+
         if st.session_state.trends and 'error' not in st.session_state.trends:
             trends = st.session_state.trends
-            
-            # Overview metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Papers Analyzed", trends['total_papers'])
-            
-            with col2:
-                st.metric("Time Range", trends['time_range'])
-            
-            with col3:
-                st.metric("Analysis Date", trends['analysis_date'])
-            
-            # Top terms chart
-            st.markdown("### 📈 Trending Terms")
+            cols = st.columns(4)
+            for i, (lbl, val, clr) in enumerate([
+                ("Papers Analyzed", trends['total_papers'], "#4299e1"),
+                ("Time Range", trends['time_range'], "#48bb78"),
+                ("Analysis Date", trends['analysis_date'], "#ed8936"),
+                ("Top Terms", len(trends['top_terms']), "#9f7aea"),
+            ]):
+                with cols[i]:
+                    st.markdown(themed(f"<div class='metric-card'><div class='metric-value' style='color:{clr};'>{val}</div><div class='metric-label'>{lbl}</div></div>"), unsafe_allow_html=True)
+
             fig = self.create_trend_chart(trends)
-            if fig:
-                st.pyplot(fig)
-            
-            # Emerging topics
+            if fig: st.plotly_chart(fig, use_container_width=True)
+
             if trends.get('emerging_topics'):
-                st.markdown("### 🚀 Emerging Topics")
+                st.markdown("<h3 class='sub-header'>🚀 Emerging Topics</h3>", unsafe_allow_html=True)
                 for topic in trends['emerging_topics']:
-                    with st.container(border=True):
-                        st.markdown(f"**{topic}**")
-                        st.progress(75)
-            
-            # Detailed data
-            with st.expander("📋 View Detailed Data"):
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.markdown(f"<div style='background:var(--trend-card-bg);color:var(--card-text);border-radius:8px;padding:1rem;margin-bottom:1rem;border-left:4px solid #667eea;'><h4 style='margin:0;'>{topic}</h4></div>", unsafe_allow_html=True)
+                    with c2:
+                        if st.button("🔍 Search", key=f"s_{topic}", use_container_width=True):
+                            st.session_state['page'] = "🔍 Semantic Search"; st.rerun()
+
+            with st.expander("📋 Detailed Data"):
                 df = pd.DataFrame(trends['top_terms'])
                 st.dataframe(df, use_container_width=True)
-                
-                # Export options
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download as CSV",
-                    data=csv,
-                    file_name=f"trends_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
+                st.download_button("📥 Download CSV", data=df.to_csv(index=False),
+                                   file_name=f"trends_{datetime.now().strftime('%Y%m%d')}.csv",
+                                   mime="text/csv")
+
         elif st.session_state.trends and 'error' in st.session_state.trends:
             st.error(st.session_state.trends['error'])
-    
+
     def render_visualizations_page(self):
-        """Render the visualizations page"""
-        st.title("📈 Visualizations")
-        
+        st.markdown("<h1 class='main-header'>🎨 Visualizations</h1>", unsafe_allow_html=True)
         if not self.papers:
-            st.warning("No papers loaded. Please upload PDFs first.")
-            return
-        
-        # Visualization selection
-        viz_type = st.selectbox(
-            "Choose Visualization Type:",
-            ["Word Cloud", "Knowledge Graph", "Comparison Chart"]
-        )
-        
-        if viz_type == "Word Cloud":
-            st.markdown("### ☁️ Word Cloud Generator")
-            
-            # Paper selection for word cloud
-            paper_options = {f"{p.title[:50]}...": pid for pid, p in self.papers.items()}
-            selected_option = st.selectbox(
-                "Select a paper:",
-                options=list(paper_options.keys()),
-                index=0
-            )
-            
-            selected_paper_id = paper_options[selected_option]
-            
-            # Generate word cloud
-            if st.button("Generate Word Cloud", type="primary"):
-                fig = self.create_wordcloud(selected_paper_id)
-                if fig:
-                    st.pyplot(fig)
-                    
-                    # Save option
-                    buf = io.BytesIO()
-                    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
-                    buf.seek(0)
-                    
-                    st.download_button(
-                        label="📥 Download Word Cloud",
-                        data=buf,
-                        file_name=f"wordcloud_{selected_paper_id}.png",
-                        mime="image/png"
-                    )
-        
-        elif viz_type == "Knowledge Graph":
-            st.markdown("### 🕸️ Knowledge Graph")
-            
-            # Multi-select papers for graph
-            paper_options = {f"{p.title[:30]}...": pid for pid, p in self.papers.items()}
-            selected_papers = st.multiselect(
-                "Select papers to include:",
-                options=list(paper_options.keys()),
-                default=list(paper_options.keys())[:3]
-            )
-            
-            selected_paper_ids = [paper_options[opt] for opt in selected_papers]
-            
-            if st.button("Generate Knowledge Graph", type="primary"):
-                if selected_paper_ids:
-                    fig = self.create_knowledge_graph(selected_paper_ids)
+            st.warning("⚠️ No papers loaded."); return
+
+        viz_type = st.selectbox("Choose Visualization:", ["☁️ Word Cloud", "🕸️ Knowledge Graph",
+                                                           "📊 Trend Chart", "📈 Comparison View"])
+
+        if viz_type == "☁️ Word Cloud":
+            opts = {f"{p.title[:60]}...": pid for pid, p in self.papers.items()}
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                sel = st.selectbox("Select paper:", list(opts.keys()))
+            with c2:
+                if st.button("✨ Generate", key="gen_wc", type="primary", use_container_width=True):
+                    fig = self.create_wordcloud(opts[sel])
                     if fig:
                         st.pyplot(fig)
-                        
-                        # Save option
                         buf = io.BytesIO()
                         fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
                         buf.seek(0)
-                        
-                        st.download_button(
-                            label="📥 Download Graph",
-                            data=buf,
-                            file_name=f"knowledge_graph_{datetime.now().strftime('%H%M%S')}.png",
-                            mime="image/png"
-                        )
-                else:
-                    st.warning("Please select at least one paper.")
-    
+                        st.download_button("📥 Download PNG", data=buf,
+                                           file_name=f"wordcloud_{opts[sel]}.png",
+                                           mime="image/png")
+
+        elif viz_type == "🕸️ Knowledge Graph":
+            opts = {f"{p.title[:40]}...": pid for pid, p in self.papers.items()}
+            sels = st.multiselect("Select papers:", list(opts.keys()),
+                                  default=list(opts.keys())[:min(3, len(opts))])
+            if sels and st.button("🕸️ Generate Graph", key="gen_graph", type="primary", use_container_width=True):
+                fig = self.create_knowledge_graph([opts[s] for s in sels])
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+
+        elif viz_type == "📊 Trend Chart":
+            if len(self.papers) >= 2:
+                fig = self.create_trend_chart(self.detect_trends())
+                if fig: st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Need at least 2 papers.")
+
+        elif viz_type == "📈 Comparison View":
+            opts = {f"{p.title[:40]}...": pid for pid, p in self.papers.items()}
+            sels = st.multiselect("Select 2-3 papers:", list(opts.keys()), max_selections=3)
+            if len(sels) >= 2:
+                rows = []
+                for name in sels:
+                    pid = opts[name]
+                    ins = self.extract_insights(pid)
+                    rows.append({
+                        "Paper": self.papers[pid].title[:40] + "...",
+                        "Word Count": ins['statistics']['word_count'],
+                        "Key Terms": len(ins['key_terms']),
+                        "Entities": sum(len(v) for v in ins['entities'].values()),
+                        "Sentiment": ins['sentiment']['overall'],
+                    })
+                df = pd.DataFrame(rows)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
     def render_settings_page(self):
-        """Render the settings page"""
-        st.title("⚙️ Settings")
-        
-        with st.form("settings_form"):
-            st.markdown("### Model Settings")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                embedding_model = st.selectbox(
-                    "Embedding Model",
-                    ["all-MiniLM-L6-v2", "paraphrase-MiniLM-L3-v2", "all-mpnet-base-v2"],
-                    index=0
-                )
-            
-            with col2:
-                summarization_model = st.selectbox(
-                    "Summarization Model",
-                    ["facebook/bart-large-cnn", "t5-small", "google/pegasus-xsum"],
-                    index=0
-                )
-            
-            st.markdown("### Processing Settings")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                chunk_size = st.slider(
-                    "Chunk Size (characters)",
-                    min_value=500,
-                    max_value=2000,
-                    value=self.config.CHUNK_SIZE,
-                    step=100
-                )
-                
-                max_summary_length = st.slider(
-                    "Max Summary Length",
-                    min_value=50,
-                    max_value=300,
-                    value=self.config.MAX_SUMMARY_LENGTH,
-                    step=10
-                )
-            
-            with col2:
-                chunk_overlap = st.slider(
-                    "Chunk Overlap",
-                    min_value=0,
-                    max_value=500,
-                    value=self.config.CHUNK_OVERLAP,
-                    step=50
-                )
-                
-                top_k_results = st.slider(
-                    "Search Results",
-                    min_value=1,
-                    max_value=20,
-                    value=self.config.TOP_K_RESULTS,
-                    step=1
-                )
-            
-            st.markdown("### Display Settings")
-            enable_viz = st.toggle("Enable Visualizations", value=self.config.ENABLE_VISUALIZATIONS)
-            save_results = st.toggle("Auto-save Results", value=self.config.SAVE_RESULTS)
-            
-            # Submit button
-            if st.form_submit_button("💾 Save Settings", type="primary"):
-                # Update config
-                self.config.EMBEDDING_MODEL = embedding_model
-                self.config.SUMMARIZATION_MODEL = summarization_model
-                self.config.CHUNK_SIZE = chunk_size
-                self.config.CHUNK_OVERLAP = chunk_overlap
-                self.config.MAX_SUMMARY_LENGTH = max_summary_length
-                self.config.TOP_K_RESULTS = top_k_results
-                self.config.ENABLE_VISUALIZATIONS = enable_viz
-                self.config.SAVE_RESULTS = save_results
-                
-                st.success("Settings saved! Please reinitialize the assistant for changes to take effect.")
-        
-        # System information
-        st.markdown("---")
-        st.markdown("### ℹ️ System Information")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Python Version", sys.version.split()[0])
-            st.metric("Streamlit Version", st.__version__)
-        
-        with col2:
-            st.metric("Papers Loaded", len(self.papers))
-            st.metric("Memory Usage", f"{sys.getsizeof(self.papers) / 1024 / 1024:.2f} MB")
-        
-        # Danger zone
-        with st.expander("⚠️ Danger Zone", expanded=False):
-            st.warning("These actions cannot be undone!")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🗑️ Clear All Data", type="secondary"):
-                    self.papers.clear()
-                    st.session_state.clear()
+        st.markdown("<h1 class='main-header'>⚙️ Settings & Configuration</h1>", unsafe_allow_html=True)
+        tab1, tab2, tab3 = st.tabs(["🔧 General", "🤖 AI Models", "⚡ Performance"])
+
+        with tab1:
+            with st.form("gen"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    theme_choice = st.selectbox(
+                        "Theme",
+                        ["Light", "Dark", "System"],
+                        index=["Light", "Dark", "System"].index(st.session_state.get('app_theme', 'Light'))
+                    )
+                    st.slider("Results per page", 5, 50, 10, 5)
+                with c2:
+                    st.toggle("Auto-save", value=True)
+                    st.toggle("Show tips", value=True)
+                save_loc = st.text_input("Save location", value=self.config.RESULTS_DIR)
+                if st.form_submit_button("💾 Save", type="primary"):
+                    self.config.RESULTS_DIR = save_loc
+                    st.session_state['app_theme'] = theme_choice
+                    st.success(f"✅ Saved! Theme set to: {theme_choice}")
                     st.rerun()
-            
-            with col2:
-                if st.button("🔄 Reset Settings", type="secondary"):
-                    self.config = Config()
-                    st.rerun()
-    
+
+        with tab2:
+            with st.form("models"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    emb = st.selectbox("Embedding Model",
+                        ["all-MiniLM-L6-v2 (Fast)", "paraphrase-MiniLM-L3-v2 (Balanced)", "all-mpnet-base-v2 (Accurate)"])
+                    summ = st.selectbox("Summarization Model",
+                        ["facebook/bart-large-cnn (Default)", "t5-small (Lightweight)", "google/pegasus-xsum (Abstractive)"])
+                with c2:
+                    ner = st.selectbox("NER Model",
+                        ["en_core_web_sm (Small)", "en_core_web_md (Medium)", "en_core_web_lg (Large)"])
+                    chunk = st.slider("Chunk size", 500, 2000, 1000, 100)
+                if st.form_submit_button("💾 Save", type="primary"):
+                    self.config.EMBEDDING_MODEL = emb.split()[0]
+                    self.config.SUMMARIZATION_MODEL = summ.split()[0]
+                    self.config.NER_MODEL = ner.split()[0]
+                    self.config.CHUNK_SIZE = chunk
+                    st.success("✅ Saved! Reinitialize to apply model changes.")
+
+        with tab3:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Python", sys.version.split()[0])
+                st.metric("Streamlit", st.__version__)
+                if PSUTIL_AVAILABLE:
+                    st.metric("RAM Available", f"{psutil.virtual_memory().available/1e9:.1f} GB")
+            with c2:
+                st.metric("Papers", len(self.papers))
+                st.metric("Cache", f"{len(self.embeddings_cache)} embeddings")
+
+            with st.form("perf"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.slider("Max workers", 1, 8, 4)
+                    st.slider("Cache size (MB)", 100, 1000, 500, 50)
+                with c2:
+                    st.toggle("Enable caching", value=True)
+                    st.toggle("Auto-cleanup", value=True)
+                if st.form_submit_button("💾 Save", type="primary"):
+                    st.success("✅ Saved!")
+
+            with st.expander("⚠️ Danger Zone"):
+                st.warning("These actions cannot be undone!")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if st.button("🗑️ Clear All Data", key="danger_clear", use_container_width=True):
+                        self.papers.clear(); st.session_state.clear(); st.rerun()
+                with c2:
+                    if st.button("🔄 Reset Settings", key="danger_reset", use_container_width=True):
+                        self.config = Config(); st.rerun()
+                with c3:
+                    if st.button("📤 Export Data", key="danger_export", use_container_width=True):
+                        self.save_state(f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+
     def generate_report(self, paper_id: str) -> str:
-        """Generate comprehensive report for a paper"""
         if paper_id not in self.papers:
-            return "Paper not found"
-        
+            return "Paper not found."
         paper = self.papers[paper_id]
-        insights = self.extract_insights(paper_id)
-        
-        report = f"""
-        ==================== RESEARCH PAPER REPORT ====================
-        
-        Title: {paper.title}
-        Authors: {', '.join(paper.authors) if paper.authors else 'Unknown'}
-        Source: {paper.source_file}
-        Date: {paper.publication_date or 'Unknown'}
-        
-        -------------------- EXECUTIVE SUMMARY --------------------
-        {insights['summary']}
-        
-        -------------------- KEY INSIGHTS --------------------
-        • Key Terms: {', '.join(insights['key_terms'][:10])}
-        • Word Count: {insights['statistics']['word_count']}
-        • Estimated Reading Time: {insights['statistics']['reading_time_minutes']} minutes
-        • Overall Sentiment: {insights['sentiment']['overall']}
-        
-        -------------------- NAMED ENTITIES --------------------
-        """
-        
-        for entity_type, entities_list in insights['entities'].items():
-            if entities_list:
-                report += f"\n{entity_type}: {', '.join(entities_list[:5])}"
-        
-        report += f"""
-        
-        -------------------- RECOMMENDATIONS --------------------
-        """
-        
-        for i, rec in enumerate(insights['recommendations'], 1):
-            report += f"\n{i}. {rec}"
-        
-        report += f"""
-        
-        -------------------- ANALYSIS METADATA --------------------
-        Analysis performed on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        Paper ID: {paper_id}
-        Total papers in database: {len(self.papers)}
-        
-        ==================== END OF REPORT ====================
-        """
-        
-        return report
-    
-    def save_state(self, file_path: str = "research_assistant_state.json"):
-        """Save current state to file"""
-        state = {
-            "config": asdict(self.config),
-            "papers": {pid: paper.to_dict() for pid, paper in self.papers.items()}
-        }
-        
+        ins = self.extract_insights(paper_id)
+        lines = [
+            "=" * 60, "  RESEARCH PAPER REPORT", "=" * 60,
+            f"Title:   {paper.title}",
+            f"Authors: {', '.join(paper.authors) if paper.authors else 'Unknown'}",
+            f"Source:  {paper.source_file}",
+            f"Date:    {paper.publication_date or 'Unknown'}",
+            "", "-" * 40, "EXECUTIVE SUMMARY", "-" * 40,
+            ins['summary'], "",
+            "-" * 40, "KEY INSIGHTS", "-" * 40,
+            f"Key Terms:    {', '.join(ins['key_terms'][:10])}",
+            f"Word Count:   {ins['statistics']['word_count']}",
+            f"Reading Time: {ins['statistics']['reading_time_minutes']} min",
+            f"Sentiment:    {ins['sentiment']['overall']}",
+            "", "-" * 40, "NAMED ENTITIES", "-" * 40,
+        ]
+        for etype, ents in ins['entities'].items():
+            if ents:
+                lines.append(f"{etype}: {', '.join(ents[:5])}")
+        lines += ["", "-" * 40, "RECOMMENDATIONS", "-" * 40]
+        for i, r in enumerate(ins['recommendations'], 1):
+            lines.append(f"{i}. {r}")
+        lines += ["", "-" * 40, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "=" * 60]
+        return "\n".join(lines)
+
+    def save_state(self, file_path: str = "state.json"):
+        state = {"config": asdict(self.config),
+                 "papers": {pid: p.to_dict() for pid, p in self.papers.items()}}
         with open(file_path, 'w') as f:
             json.dump(state, f, indent=2)
-        
-        st.success(f"State saved to: {file_path}")
-    
-    def load_state(self, file_path: str = "research_assistant_state.json"):
-        """Load state from file"""
-        if not os.path.exists(file_path):
-            st.error(f"State file not found: {file_path}")
-            return False
-        
-        try:
-            with open(file_path, 'r') as f:
-                state = json.load(f)
-            
-            # Load config
-            self.config = Config(**state['config'])
-            
-            # Load papers
-            self.papers = {}
-            for pid, paper_data in state['papers'].items():
-                paper = ResearchPaper(**paper_data)
-                self.papers[pid] = paper
-                # Regenerate embeddings
-                self._generate_embeddings(paper)
-            
-            # Reinitialize vector DB
-            self._initialize_vector_db()
-            
-            # Add papers to vector DB
-            for paper in self.papers.values():
-                self._add_to_vector_db(paper)
-            
-            st.success(f"Loaded {len(self.papers)} papers from state file")
-            return True
-            
-        except Exception as e:
-            st.error(f"Error loading state: {e}")
-            return False
+        st.success(f"✅ Saved to: {file_path}")
 
-# ==================== STREAMLIT APP ====================
+    def load_state(self, file_path: str = "state.json"):
+        if not os.path.exists(file_path):
+            st.error(f"❌ Not found: {file_path}"); return False
+        try:
+            with open(file_path) as f:
+                state = json.load(f)
+            self.config = Config(**state['config'])
+            self.papers = {}
+            for pid, d in state['papers'].items():
+                d.pop('embeddings', None)
+                self.papers[pid] = ResearchPaper(**d)
+                self._generate_embeddings(self.papers[pid])
+            self._initialize_vector_db()
+            for p in self.papers.values():
+                self._add_to_vector_db(p)
+            st.success(f"✅ Loaded {len(self.papers)} papers.")
+            return True
+        except Exception as e:
+            st.error(f"❌ Error: {e}"); return False
+
+
+# ==================== MAIN STREAMLIT APP ====================
 def main():
-    """Main Streamlit application"""
-    
-    # Page configuration
     st.set_page_config(
         page_title="NLP Research Assistant",
         page_icon="🔬",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="expanded",
+        menu_items={
+            'Get Help': 'https://github.com/your-repo',
+            'Report a bug': 'https://github.com/your-repo/issues',
+            'About': "# NLP Research Assistant\nAI-powered document analysis tool.",
+        }
     )
-    
-    # Custom CSS
-    st.markdown("""
-    <style>
-    .stButton > button {
-        width: 100%;
-    }
-    .stDownloadButton > button {
-        width: 100%;
-    }
-    .css-1d391kg {
-        padding-top: 3rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Initialize assistant
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
     if 'assistant' not in st.session_state:
         with st.spinner("🚀 Initializing NLP Research Assistant..."):
             st.session_state.assistant = NLPResearchAssistant()
             st.session_state.assistant._initialize_nlp_components()
-    
-    assistant = st.session_state.assistant
-    
-    # Render sidebar and get page selection
-    page = assistant.render_sidebar()
-    
-    # Map page names to render functions
-    page_map = {
-        "🏠 Home": assistant.render_home_page,
-        "📄 Document Analysis": assistant.render_document_analysis_page,
-        "🔍 Semantic Search": assistant.render_search_page,
-        "📊 Trend Analysis": assistant.render_trends_page,
-        "📈 Visualizations": assistant.render_visualizations_page,
-        "⚙️ Settings": assistant.render_settings_page
-    }
-    
-    # Render selected page
-    if page in page_map:
-        page_map[page]()
-    else:
-        assistant.render_home_page()
 
-# ==================== MAIN ENTRY POINT ====================
+    assistant = st.session_state.assistant
+
+    if 'page' not in st.session_state:
+        st.session_state['page'] = "🏠 Dashboard"
+
+    selected = assistant.render_sidebar()
+    if selected != st.session_state['page']:
+        st.session_state['page'] = selected
+
+    {
+        "🏠 Dashboard": assistant.render_home_page,
+        "📄 Paper Analyzer": assistant.render_document_analysis_page,
+        "🔍 Semantic Search": assistant.render_search_page,
+        "📊 Trends Explorer": assistant.render_trends_page,
+        "🎨 Visualizations": assistant.render_visualizations_page,
+        "⚙️ Settings": assistant.render_settings_page,
+    }.get(st.session_state['page'], assistant.render_home_page)()
+
+
+# ==================== ENTRY POINT ====================
 if __name__ == "__main__":
-    # Suppress warnings for cleaner output
     warnings.filterwarnings('ignore')
-    
-    # Check if running in Streamlit
     if STREAMLIT_AVAILABLE:
         main()
     else:
-        # Fall back to command line interface
-        print("\n" + "="*60)
-        print("      NLP RESEARCH ASSISTANT")
-        print("="*60)
-        print("Streamlit not available. Running in command line mode...")
-        print("="*60 + "\n")
-        
-        # You could add the CLI interface here if needed
-        print("Please install Streamlit for the web interface:")
-        print("pip install streamlit")
-        print("\nThen run: streamlit run your_script.py")
+        print("Install streamlit: pip install streamlit")
+        print("Then run: streamlit run main.py")
